@@ -29,11 +29,11 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
     except (TimedOut, NetworkError):
         pass  # Non-critical, continue anyway
     
-    # Search for creator content
+    # Search for creator options first
     try:
         search_message = await send_message_with_retry(
             update.message.reply_text,
-            f"🔍 Searching for content from '{creator_name}'...\n"
+            f"🔍 Searching for '{creator_name}'...\n"
             "This may take a few moments."
         )
     except (TimedOut, NetworkError) as e:
@@ -41,10 +41,10 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
         return
     
     try:
-        # Get content directory
-        content_directory = await bot_instance.content_manager.search_creator_content(creator_name, session.filters)
+        # Check if we need to show multiple options or proceed directly
+        search_options = await bot_instance.content_manager.search_creator_options(creator_name)
         
-        if not content_directory:
+        if not search_options:
             try:
                 await send_message_with_retry(
                     search_message.edit_text,
@@ -55,49 +55,18 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
                 pass
             return
         
-        # Check if confirmation is needed
-        if content_directory.get('needs_confirmation', False):
-            matched_name = content_directory['creator']
-            social_links = content_directory.get('social_links', {})
+        # Show options for user to choose
+        if search_options.get('needs_selection'):
+            options = search_options['options']
             
-            # Build the confirmation text
-            confirm_text = f"🔍 Did you mean: **{matched_name}**?\n\n"
+            # Store all options in session for pagination
+            session.pending_creator_options = options
+            session.pending_creator_name = creator_name
+            session.creator_selection_page = 0  # Start at page 0
             
-            # Add OnlyFans link if available
-            if social_links.get('onlyfans'):
-                confirm_text += f"🔗 OnlyFans: {social_links['onlyfans']}\n"
-            
-            # Add Instagram link if available
-            if social_links.get('instagram'):
-                confirm_text += f"📸 Instagram: {social_links['instagram']}\n"
-            
-            confirm_text += "\nPlease confirm if this is the creator you're looking for."
-            
-            keyboard = [
-                [InlineKeyboardButton("✅ Yes, Continue", callback_data=f"confirm_search|{matched_name}")],
-                [InlineKeyboardButton("❌ No, Try Again", callback_data="search_creator")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            # Store content for later use
-            session.pending_content = content_directory
-            
-            try:
-                await send_message_with_retry(
-                    search_message.edit_text,
-                    confirm_text,
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-            except (TimedOut, NetworkError):
-                pass
-        else:
-            # Display content directory immediately
-            await display_content_directory(update, bot_instance, content_directory, content_directory['creator'])
-            try:
-                await search_message.delete()
-            except (TimedOut, NetworkError, BadRequest):
-                pass  # Non-critical if deletion fails
+            # Display first page
+            await display_creator_selection_page(search_message, session, 0)
+            return
         
     except Exception as e:
         logger.error(f"Error searching for creator {creator_name}: {e}")
@@ -120,6 +89,7 @@ async def display_content_directory(update: Update, bot_instance, content_direct
     # Create directory display
     total_pictures = len(content_directory.get('preview_images', []))
     total_videos = len(content_directory.get('video_links', []))
+    has_more_pages = content_directory.get('has_more_pages', False)
     
     directory_text = format_directory_text(creator_name, content_directory, session.filters)
     
@@ -134,6 +104,10 @@ async def display_content_directory(update: Update, bot_instance, content_direct
     if total_videos > 0:
         keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
     
+    # Add "Load More" button if there are more pages available
+    if has_more_pages:
+        keyboard.append([InlineKeyboardButton("⬇️ Load More Pages (3 more)", callback_data="load_more_pages")])
+    
     keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -146,3 +120,68 @@ async def display_content_directory(update: Update, bot_instance, content_direct
         )
     except (TimedOut, NetworkError) as e:
         logger.error(f"Failed to display content directory: {e}")
+
+
+async def display_creator_selection_page(message, session, page: int = 0):
+    """Display a page of creator options with pagination."""
+    options = session.pending_creator_options
+    creator_name = session.pending_creator_name
+    
+    if not options:
+        await message.edit_text("❌ No creator options available. Please search again.")
+        return
+    
+    # Pagination settings
+    items_per_page = 5
+    total_pages = (len(options) + items_per_page - 1) // items_per_page
+    
+    # Ensure page is within bounds
+    if page < 0:
+        page = 0
+    elif page >= total_pages:
+        page = total_pages - 1
+    
+    # Get items for current page
+    start_idx = page * items_per_page
+    end_idx = min(start_idx + items_per_page, len(options))
+    page_options = options[start_idx:end_idx]
+    
+    # Build the selection message
+    select_text = f"🔍 Found {len(options)} matches for '{creator_name}':\n\n"
+    select_text += "Please select the correct creator:\n\n"
+    
+    if total_pages > 1:
+        select_text += f"📄 Page {page + 1}/{total_pages}\n\n"
+    
+    keyboard = []
+    for i, option in enumerate(page_options):
+        actual_idx = start_idx + i
+        name = option['name']
+        
+        # Show name without similarity percentage
+        button_text = f"{name}"
+        callback_data = f"select_creator|{actual_idx}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+    
+    # Add navigation buttons if there are multiple pages
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"creator_page|{page - 1}"))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"creator_page|{page + 1}"))
+        
+        if nav_buttons:
+            keyboard.append(nav_buttons)
+    
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="search_creator")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await send_message_with_retry(
+            message.edit_text,
+            select_text,
+            reply_markup=reply_markup
+        )
+    except (TimedOut, NetworkError):
+        pass

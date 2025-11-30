@@ -91,12 +91,27 @@ def format_directory_text(creator_name: str, content_directory: dict, filters: d
     total_items = len(content_directory.get('items', []))
     total_pictures = len(content_directory.get('preview_images', []))
     total_videos = len(content_directory.get('video_links', []))
+    pages_scraped = content_directory.get('pages_scraped', 0)
+    total_pages = content_directory.get('total_pages', 0)
+    has_more = content_directory.get('has_more_pages', False)
+    social_links = content_directory.get('social_links', {})
+    
+    # Show content availability info
+    content_info = ""
+    if has_more:
+        content_info = f"\n💡 More content available!"
+    
+    # Add social links
+    social_info = ""
+    if social_links.get('onlyfans'):
+        social_info += f"\n🔗 OnlyFans: {social_links['onlyfans']}"
+    if social_links.get('instagram'):
+        social_info += f"\n📸 Instagram: {social_links['instagram']}"
     
     return f"""
-📁 Content Directory for: {creator_name}
-📊 Total Items: {total_items}
-🖼️ Preview Pictures: {total_pictures}
-🎬 Videos: {total_videos}
+📁 Content for: {creator_name}{social_info}
+🖼️ Pictures: {total_pictures}
+🎬 Videos: {total_videos}{content_info}
 📅 Last Updated: {content_directory.get('last_updated', 'Unknown')}
 
 Browse content below:

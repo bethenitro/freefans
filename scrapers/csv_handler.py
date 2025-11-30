@@ -4,7 +4,7 @@ CSV Handler - Search and match creators from CSV file
 
 import csv
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
@@ -52,3 +52,43 @@ def search_model_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv'
     except Exception as e:
         logger.error(f"Error searching CSV: {e}")
         return None
+
+
+def search_multiple_models_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv', max_results: int = 5) -> List[Tuple[str, str, float]]:
+    """
+    Search for multiple potential matches in the CSV file.
+    Returns list of (matched_name, url, similarity_score) tuples, sorted by similarity
+    """
+    try:
+        matches = []
+        creator_name_lower = creator_name.lower()
+        
+        with open(csv_path, 'r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                model_name = row['model_name']
+                profile_link = row['profile_link']
+                
+                # Check for exact match first
+                if creator_name_lower == model_name.lower():
+                    return [(model_name, profile_link, 1.0)]
+                
+                # Check if creator name is in model name (handles aliases)
+                if creator_name_lower in model_name.lower():
+                    matches.append((model_name, profile_link, 0.9))
+                    continue
+                
+                # Calculate similarity using SequenceMatcher
+                similarity = SequenceMatcher(None, creator_name_lower, model_name.lower()).ratio()
+                
+                # Only include matches with at least 40% similarity for multiple results
+                if similarity >= 0.4:
+                    matches.append((model_name, profile_link, similarity))
+        
+        # Sort by similarity (highest first) and return top results
+        matches.sort(key=lambda x: x[2], reverse=True)
+        return matches[:max_results]
+        
+    except Exception as e:
+        logger.error(f"Error searching CSV for multiple matches: {e}")
+        return []

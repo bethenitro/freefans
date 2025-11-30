@@ -298,12 +298,12 @@ class OnlyFansForumScraper:
                     continue
             
             print("-" * 50)
-            print(f"🎉 Scraping completed! Total models found: {len(all_models)}")
+            print(f"🎉 Fetching completed! Total models found: {len(all_models)}")
             
             # Clean up checkpoint file when fully completed
             if page_num >= max_pages and os.path.exists(self.checkpoint_file):
                 os.remove(self.checkpoint_file)
-                print("🧹 Removed checkpoint file (scraping completed)")
+                print("🧹 Removed checkpoint file (Fetching completed)")
             
             return all_models
 
@@ -326,7 +326,7 @@ async def main():
         models = await scraper.scrape_all_pages(max_pages=165)
         
         # Display some statistics
-        print("\n📈 Final Scraping Statistics:")
+        print("\n📈 Final Fetching Statistics:")
         print(f"Total unique models: {len(models)}")
         print(f"CSV file: {scraper.data_file}")
         
@@ -338,7 +338,7 @@ async def main():
                 print(f"   Link: {model['profile_link']}")
         
     except KeyboardInterrupt:
-        print("\n⚠️ Scraping interrupted by user")
+        print("\n⚠️ Fetching interrupted by user")
         print("💾 Progress has been saved. You can resume by running the script again.")
     except Exception as e:
         print(f"\n❌ An error occurred: {e}")

@@ -31,7 +31,15 @@ def escape_markdown(text: str) -> str:
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_instance) -> None:
     """Handle callback queries from inline keyboards."""
     query = update.callback_query
-    await query.answer()
+    
+    # Answer callback query immediately to prevent timeout
+    try:
+        await query.answer()
+    except BadRequest as e:
+        if "Query is too old" in str(e):
+            logger.warning(f"Callback query expired, continuing anyway: {e}")
+        else:
+            raise
     
     user_id = update.effective_user.id
     data = query.data
@@ -45,8 +53,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     # Route to appropriate handler
     if data == "search_creator":
         await handle_search_creator(query)
+    elif data.startswith("creator_page|"):
+        await handle_creator_page_change(query, session, data)
+    elif data.startswith("select_creator|"):
+        await handle_select_creator(query, session, data, bot_instance)
     elif data.startswith("confirm_search|"):
         await handle_confirm_search(query, session, data, bot_instance)
+    elif data == "load_more_pages":
+        await handle_load_more_pages(query, session, bot_instance)
     elif data == "help":
         from bot.command_handlers import HELP_TEXT
         await query.message.reply_text(HELP_TEXT)
@@ -93,6 +107,141 @@ async def handle_search_creator(query) -> None:
     await query.edit_message_text("🔍 Please send me the name of the creator you want to search for:")
 
 
+async def handle_creator_page_change(query, session, data: str) -> None:
+    """Handle pagination for creator selection."""
+    try:
+        page = int(data.split("|")[1])
+        session.creator_selection_page = page
+        
+        # Use the display function from search_handler
+        from bot.search_handler import display_creator_selection_page
+        await display_creator_selection_page(query.message, session, page)
+        
+    except (IndexError, ValueError) as e:
+        logger.error(f"Error handling creator page change: {e}")
+        await query.answer("❌ Error changing page", show_alert=True)
+
+
+async def handle_select_creator(query, session, data: str, bot_instance) -> None:
+    """Handle user selection of a creator from multiple options."""
+    if not session.pending_creator_options:
+        await query.edit_message_text("❌ No creator options available. Please search again.")
+        return
+    
+    # Extract the selected index
+    try:
+        selected_idx = int(data.split("|")[1])
+        selected_option = session.pending_creator_options[selected_idx]
+    except (IndexError, ValueError):
+        await query.edit_message_text("❌ Invalid selection. Please try again.")
+        return
+    
+    creator_name = selected_option['name']
+    creator_url = selected_option['url']
+    
+    # Show initial loading message
+    await query.edit_message_text(
+        f"✅ Selected: {creator_name}\n"
+        f"🔄 Loading content..."
+    )
+    
+    # Import asyncio for progress messages
+    import asyncio
+    
+    # Progress messages to show while loading
+    filler_messages = [
+        f"✅ Selected: {creator_name}\n🔄 Connecting to database...",
+        f"✅ Selected: {creator_name}\n🔄 Retrieving content...",
+        f"✅ Selected: {creator_name}\n🔄 Processing media...",
+        f"✅ Selected: {creator_name}\n🔄 Almost ready..."
+    ]
+    
+    # Create a task for fetching content
+    fetch_task = asyncio.create_task(
+        bot_instance.content_manager.search_creator_content(
+            creator_name,
+            session.filters,
+            direct_url=creator_url
+        )
+    )
+    
+    # Show filler messages while fetching
+    message_index = 0
+    while not fetch_task.done():
+        try:
+            # Update message every 2 seconds
+            await asyncio.sleep(2)
+            if not fetch_task.done() and message_index < len(filler_messages):
+                await query.edit_message_text(filler_messages[message_index])
+                message_index += 1
+        except Exception:
+            pass  # Ignore errors during filler message updates
+    
+    # Get the result
+    try:
+        content_directory = await fetch_task
+        
+        if not content_directory:
+            await query.edit_message_text(
+                f"❌ Failed to load content for '{creator_name}'.\n\n"
+                "Please try again later."
+            )
+            return
+            
+        # Update session
+        session.current_directory = content_directory
+        session.current_creator = creator_name
+        
+        # Display content directory (always show Load More if not all pages fetched)
+        total_pictures = len(content_directory.get('preview_images', []))
+        total_videos = len(content_directory.get('video_links', []))
+        total_pages = content_directory.get('total_pages', 1)
+        end_page = content_directory.get('end_page', 1)
+        has_more_pages = end_page < total_pages  # Show if not all pages fetched
+        directory_text = format_directory_text(creator_name, content_directory, session.filters)
+        
+        # Create keyboard
+        keyboard = []
+        
+        if total_pictures > 0:
+            keyboard.append([InlineKeyboardButton(f"🖼️ View Pictures ({total_pictures})", callback_data="view_pictures")])
+        
+        if total_videos > 0:
+            keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+        
+        # Always show Load More if more content available
+        if has_more_pages:
+            keyboard.append([InlineKeyboardButton("⬇️ Load More Content", callback_data="load_more_pages")])
+        
+        keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await send_message_with_retry(
+            query.message.reply_text,
+            directory_text,
+            reply_markup=reply_markup
+        )
+        
+        # Delete the selection message
+        try:
+            await query.delete_message()
+        except (TimedOut, NetworkError, BadRequest):
+            pass
+        
+        # Clear pending options
+        session.pending_creator_options = None
+        session.pending_creator_name = None
+        
+    except Exception as e:
+        logger.error(f"Error loading selected creator: {e}")
+        await query.edit_message_text(
+            f"❌ An error occurred while loading content for '{creator_name}'.\n\n"
+            "Please try again later."
+        )
+
+
+
 async def handle_confirm_search(query, session, data: str, bot_instance) -> None:
     """Handle confirmation of fuzzy match."""
     creator_name = data.split("|")[1]
@@ -117,6 +266,7 @@ async def display_content_directory_from_callback(query, session, content_direct
     
     total_pictures = len(content_directory.get('preview_images', []))
     total_videos = len(content_directory.get('video_links', []))
+    has_more_pages = content_directory.get('has_more_pages', False)
     directory_text = format_directory_text(creator_name, content_directory, session.filters)
     
     # Create keyboard with only Pictures and Videos buttons (no content items)
@@ -127,6 +277,10 @@ async def display_content_directory_from_callback(query, session, content_direct
     
     if total_videos > 0:
         keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+    
+    # Add "Load More" button if there are more pages available
+    if has_more_pages:
+        keyboard.append([InlineKeyboardButton("⬇️ Load More Pages (3 more)", callback_data="load_more_pages")])
     
     keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
     
@@ -140,6 +294,79 @@ async def display_content_directory_from_callback(query, session, content_direct
         )
     except (TimedOut, NetworkError) as e:
         logger.error(f"Failed to display content directory from callback: {e}")
+
+
+async def handle_load_more_pages(query, session, bot_instance) -> None:
+    """Handle loading more content for the current creator."""
+    if not session.current_directory or not session.current_creator:
+        await query.edit_message_text("❌ No content available.")
+        return
+    
+    creator_name = session.current_creator
+    current_content = session.current_directory
+    
+    # Check if there is actually more content to load
+    if not current_content.get('has_more_pages', False):
+        await query.answer("✅ All available content has been loaded!", show_alert=True)
+        return
+    
+    # Answer callback query immediately to prevent timeout
+    try:
+        await query.answer()
+    except Exception:
+        pass  # Ignore if query already expired
+    
+    # Show loading message
+    await query.edit_message_text(
+        f"⏳ Loading more content for '{creator_name}'...\n"
+        f"Please wait..."
+    )
+    
+    try:
+        # Load more content
+        updated_content = await bot_instance.content_manager.fetch_more_pages(
+            creator_name,
+            session.filters,
+            current_content,
+            pages_to_fetch=3
+        )
+        
+        if updated_content:
+            # Update session with new content
+            session.current_directory = updated_content
+            
+            # Display updated directory
+            total_pictures = len(updated_content.get('preview_images', []))
+            total_videos = len(updated_content.get('video_links', []))
+            has_more_pages = updated_content.get('has_more_pages', False)
+            directory_text = format_directory_text(creator_name, updated_content, session.filters)
+            
+            # Create keyboard
+            keyboard = []
+            
+            if total_pictures > 0:
+                keyboard.append([InlineKeyboardButton(f"🖼️ View Pictures ({total_pictures})", callback_data="view_pictures")])
+            
+            if total_videos > 0:
+                keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+            
+            # Add "Load More" button if there is still more content
+            if has_more_pages:
+                keyboard.append([InlineKeyboardButton("⬇️ Load More Content", callback_data="load_more_pages")])
+            
+            keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(directory_text, reply_markup=reply_markup)
+            
+            # Success message shown in the updated content
+        else:
+            await query.edit_message_text("❌ Failed to load more content. Please try again.")
+            
+    except Exception as e:
+        logger.error(f"Error loading more content: {e}")
+        await query.edit_message_text("❌ An error occurred while loading more content.")
 
 
 async def handle_set_filters(query, session) -> None:
@@ -310,6 +537,7 @@ async def handle_back_to_list(query, session) -> None:
     content_directory = session.current_directory
     total_pictures = len(content_directory.get('preview_images', []))
     total_videos = len(content_directory.get('video_links', []))
+    has_more_pages = content_directory.get('has_more_pages', False)
     
     directory_text = format_directory_text(creator_name, content_directory, session.filters)
     
@@ -321,6 +549,10 @@ async def handle_back_to_list(query, session) -> None:
     
     if total_videos > 0:
         keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+    
+    # Add "Load More" button if there are more pages available
+    if has_more_pages:
+        keyboard.append([InlineKeyboardButton("⬇️ Load More Pages (3 more)", callback_data="load_more_pages")])
     
     keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
     

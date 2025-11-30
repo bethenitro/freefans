@@ -27,6 +27,9 @@ class UserSession:
         self.current_page = 0
         self.search_history = []
         self.pending_content = None  # For confirmation flow
+        self.pending_creator_options = None  # For multiple creator selection
+        self.pending_creator_name = None  # For storing the searched name
+        self.creator_selection_page = 0  # For paginating creator options
         
         # User interaction tracking
         self.total_searches = 0
