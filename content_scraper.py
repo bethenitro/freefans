@@ -110,8 +110,8 @@ class SimpleCityScraper:
             multiple_matches = self.search_multiple_models_in_csv(creator_name, max_results=10)
             
             if multiple_matches:
-                # Filter matches with at least 40% similarity
-                filtered_matches = [m for m in multiple_matches if m[2] >= 0.4]
+                # Filter matches with at least 50% similarity
+                filtered_matches = [m for m in multiple_matches if m[2] >= 0.5]
                 
                 if filtered_matches:
                     logger.info(f"Found {len(filtered_matches)} CSV matches, showing options")

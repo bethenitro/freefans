@@ -327,20 +327,11 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
     creator_name = extract_creator_name_from_title(creator_title)
     creator_url = selected_option['url']
     
-    # Show confirmation (without mentioning source)
-    confirm_text = f"""
-✅ **Selected:**
-
-📝 {creator_title[:100]}
-👤 Creator: {creator_name}
-💬 Replies: {selected_option.get('replies', 0)}
-
-➕ This creator will be added to your database for faster future searches.
-
-⏳ Loading content...
-    """
-    
-    await query.edit_message_text(confirm_text, parse_mode='Markdown')
+    # Show simple loading message
+    await query.edit_message_text(
+        f"✅ Selected: {creator_name}\n"
+        f"🔄 Loading content..."
+    )
     
     # Add creator to CSV (silently)
     try:
