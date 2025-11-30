@@ -30,6 +30,7 @@ class UserSession:
         self.pending_creator_options = None  # For multiple creator selection
         self.pending_creator_name = None  # For storing the searched name
         self.creator_selection_page = 0  # For paginating creator options
+        self.is_simpcity_search = False  # Flag to indicate SimpCity search results
         
         # User interaction tracking
         self.total_searches = 0
@@ -151,6 +152,10 @@ class UserSession:
         """Check if the session is still active based on last activity."""
         time_diff = datetime.now() - self.last_activity
         return time_diff.total_seconds() < (timeout_minutes * 60)
+    
+    def get(self, key: str, default=None):
+        """Get an attribute value with a default if it doesn't exist."""
+        return getattr(self, key, default)
     
     def __str__(self) -> str:
         """String representation of the session."""

@@ -11,6 +11,10 @@ from scrapers.parsers import (
     extract_max_pages, extract_social_links, extract_preview_images,
     extract_content_links, extract_video_links, group_content_by_type
 )
+from scrapers.simpcity_search import (
+    build_search_url, parse_search_results, add_creator_to_csv, 
+    extract_creator_name_from_title
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,42 +61,101 @@ class SimpleCityScraper:
         """Group content items by type"""
         return group_content_by_type(content_items)
     
+    async def search_simpcity(self, creator_name: str) -> Optional[List[Dict]]:
+        """
+        Search for creator on SimpCity when not found in CSV.
+        Returns list of search results filtered for OnlyFans forum with >1 reply.
+        """
+        try:
+            search_url = build_search_url(creator_name)
+            logger.info(f"Searching SimpCity for: {creator_name}")
+            logger.info(f"Search URL: {search_url}")
+            
+            html = await self.fetch_page(search_url)
+            if not html:
+                logger.error("Failed to fetch search results page")
+                return None
+            
+            results = parse_search_results(html)
+            
+            if not results:
+                logger.info(f"No valid results found for {creator_name}")
+                return None
+            
+            logger.info(f"Found {len(results)} results for {creator_name}")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error searching SimpCity: {e}")
+            return None
+    
+    def add_creator_to_csv(self, creator_name: str, profile_url: str) -> bool:
+        """Add a new creator to the CSV file."""
+        return add_creator_to_csv(creator_name, profile_url)
+    
     async def search_creator_options(self, creator_name: str) -> Optional[Dict]:
         """
         Search for creator and return multiple options.
+        First searches CSV, then falls back to SimpCity search if not found.
         
         Returns:
             - None if no matches found
             - Dict with 'needs_selection': True and 'options' for all searches
+            - Dict with 'simpcity_search': True if showing SimpCity results
         """
         try:
             logger.info(f"Searching for creator options: {creator_name}")
             
-            # Always get multiple matches
+            # First, try CSV search
             multiple_matches = self.search_multiple_models_in_csv(creator_name, max_results=10)
             
-            if not multiple_matches:
-                logger.info(f"No matches found for: {creator_name}")
+            if multiple_matches:
+                # Filter matches with at least 40% similarity
+                filtered_matches = [m for m in multiple_matches if m[2] >= 0.4]
+                
+                if filtered_matches:
+                    logger.info(f"Found {len(filtered_matches)} CSV matches, showing options")
+                    
+                    # Always show options for user to select
+                    return {
+                        'needs_selection': True,
+                        'options': [
+                            {
+                                'name': name,
+                                'url': url,
+                                'similarity': sim,
+                                'source': 'csv'
+                            }
+                            for name, url, sim in filtered_matches[:10]  # Show up to 10 matches
+                        ],
+                        'searched_name': creator_name,
+                        'simpcity_search': False
+                    }
+            
+            # If no CSV matches, search SimpCity
+            logger.info(f"No CSV matches found, searching SimpCity for: {creator_name}")
+            simpcity_results = await self.search_simpcity(creator_name)
+            
+            if not simpcity_results:
+                logger.info(f"No SimpCity results found for: {creator_name}")
                 return None
             
-            # Filter matches with at least 40% similarity
-            filtered_matches = [m for m in multiple_matches if m[2] >= 0.4]
-            
-            if not filtered_matches:
-                return None
-            
-            logger.info(f"Found {len(filtered_matches)} matches, showing options")
-            
-            # Always show options for user to select
+            # Format SimpCity results for display
+            logger.info(f"Found {len(simpcity_results)} SimpCity results")
             return {
                 'needs_selection': True,
+                'simpcity_search': True,
                 'options': [
                     {
-                        'name': name,
-                        'url': url,
-                        'similarity': sim
+                        'name': result['title'],
+                        'url': result['url'],
+                        'replies': result['replies'],
+                        'date': result['date'],
+                        'snippet': result['snippet'],
+                        'thumbnail': result['thumbnail'],
+                        'source': 'simpcity'
                     }
-                    for name, url, sim in filtered_matches[:10]  # Show up to 10 matches
+                    for result in simpcity_results
                 ],
                 'searched_name': creator_name
             }

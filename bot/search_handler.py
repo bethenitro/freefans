@@ -58,11 +58,13 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
         # Show options for user to choose
         if search_options.get('needs_selection'):
             options = search_options['options']
+            is_simpcity = search_options.get('simpcity_search', False)
             
             # Store all options in session for pagination
             session.pending_creator_options = options
             session.pending_creator_name = creator_name
             session.creator_selection_page = 0  # Start at page 0
+            session.is_simpcity_search = is_simpcity  # Store search type
             
             # Display first page
             await display_creator_selection_page(search_message, session, 0)
@@ -126,6 +128,7 @@ async def display_creator_selection_page(message, session, page: int = 0):
     """Display a page of creator options with pagination."""
     options = session.pending_creator_options
     creator_name = session.pending_creator_name
+    is_simpcity = session.get('is_simpcity_search', False)
     
     if not options:
         await message.edit_text("❌ No creator options available. Please search again.")
@@ -147,8 +150,13 @@ async def display_creator_selection_page(message, session, page: int = 0):
     page_options = options[start_idx:end_idx]
     
     # Build the selection message
-    select_text = f"🔍 Found {len(options)} matches for '{creator_name}':\n\n"
-    select_text += "Please select the correct creator:\n\n"
+    if is_simpcity:
+        select_text = f"🔍 Extended Search Results for '{creator_name}':\n\n"
+        select_text += f"Found {len(options)} additional matches.\n"
+        select_text += "Please select the correct creator:\n\n"
+    else:
+        select_text = f"🔍 Found {len(options)} matches for '{creator_name}':\n\n"
+        select_text += "Please select the correct creator:\n\n"
     
     if total_pages > 1:
         select_text += f"📄 Page {page + 1}/{total_pages}\n\n"
@@ -156,11 +164,27 @@ async def display_creator_selection_page(message, session, page: int = 0):
     keyboard = []
     for i, option in enumerate(page_options):
         actual_idx = start_idx + i
-        name = option['name']
         
-        # Show name without similarity percentage
-        button_text = f"{name}"
-        callback_data = f"select_creator|{actual_idx}"
+        if is_simpcity:
+            # Format SimpCity results with more details
+            name = option['name']
+            
+            # Clean up platform names from the title
+            from scrapers.simpcity_search import extract_creator_name_from_title
+            clean_name = extract_creator_name_from_title(name)
+            
+            # Truncate name if too long
+            if len(clean_name) > 60:
+                clean_name = clean_name[:57] + "..."
+            
+            button_text = f"{clean_name}"
+            callback_data = f"select_simpcity|{actual_idx}"
+        else:
+            # Format CSV results
+            name = option['name']
+            button_text = f"{name}"
+            callback_data = f"select_creator|{actual_idx}"
+        
         keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
     
     # Add navigation buttons if there are multiple pages
@@ -173,6 +197,10 @@ async def display_creator_selection_page(message, session, page: int = 0):
         
         if nav_buttons:
             keyboard.append(nav_buttons)
+    
+    # Add "Extended Search" button for CSV results (not for SimpCity results)
+    if not is_simpcity:
+        keyboard.append([InlineKeyboardButton("🔍 Not found? Search More", callback_data="search_on_simpcity")])
     
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="search_creator")])
     reply_markup = InlineKeyboardMarkup(keyboard)

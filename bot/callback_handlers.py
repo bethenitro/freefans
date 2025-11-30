@@ -53,10 +53,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     # Route to appropriate handler
     if data == "search_creator":
         await handle_search_creator(query)
+    elif data == "search_on_simpcity":
+        await handle_search_on_simpcity(query, session, bot_instance)
     elif data.startswith("creator_page|"):
         await handle_creator_page_change(query, session, data)
     elif data.startswith("select_creator|"):
         await handle_select_creator(query, session, data, bot_instance)
+    elif data.startswith("select_simpcity|"):
+        await handle_select_simpcity(query, session, data, bot_instance)
     elif data.startswith("confirm_search|"):
         await handle_confirm_search(query, session, data, bot_instance)
     elif data == "load_more_pages":
@@ -105,6 +109,68 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 async def handle_search_creator(query) -> None:
     """Handle search creator callback."""
     await query.edit_message_text("🔍 Please send me the name of the creator you want to search for:")
+
+
+async def handle_search_on_simpcity(query, session, bot_instance) -> None:
+    """Handle extended search request when CSV results don't match."""
+    if not session.pending_creator_name:
+        await query.edit_message_text("❌ No search query found. Please start a new search.")
+        return
+    
+    creator_name = session.pending_creator_name
+    
+    # Show loading message
+    await query.edit_message_text(
+        f"🔍 Performing extended search for '{creator_name}'...\n"
+        "This may take a few moments."
+    )
+    
+    # Import asyncio
+    import asyncio
+    
+    try:
+        # Search SimpCity (but don't tell the user)
+        simpcity_results = await bot_instance.content_manager.scraper.search_simpcity(creator_name)
+        
+        if not simpcity_results:
+            await query.edit_message_text(
+                f"❌ No additional results found for '{creator_name}'.\n\n"
+                "The creator may not be available, or try:\n"
+                "• Check the spelling\n"
+                "• Try a different name/alias\n"
+                "• Search for a different creator"
+            )
+            return
+        
+        # Format and display results (without mentioning SimpCity)
+        logger.info(f"Found {len(simpcity_results)} extended search results for {creator_name}")
+        
+        # Store results in session
+        session.pending_creator_options = [
+            {
+                'name': result['title'],
+                'url': result['url'],
+                'replies': result['replies'],
+                'date': result['date'],
+                'snippet': result['snippet'],
+                'thumbnail': result['thumbnail'],
+                'source': 'simpcity'
+            }
+            for result in simpcity_results
+        ]
+        session.is_simpcity_search = True
+        session.creator_selection_page = 0
+        
+        # Display first page
+        from bot.search_handler import display_creator_selection_page
+        await display_creator_selection_page(query.message, session, 0)
+        
+    except Exception as e:
+        logger.error(f"Error in extended search: {e}")
+        await query.edit_message_text(
+            "❌ An error occurred during the extended search.\n\n"
+            "Please try again later."
+        )
 
 
 async def handle_creator_page_change(query, session, data: str) -> None:
@@ -237,6 +303,143 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         logger.error(f"Error loading selected creator: {e}")
         await query.edit_message_text(
             f"❌ An error occurred while loading content for '{creator_name}'.\n\n"
+            "Please try again later."
+        )
+
+
+async def handle_select_simpcity(query, session, data: str, bot_instance) -> None:
+    """Handle user selection of a creator from extended search results."""
+    if not session.pending_creator_options:
+        await query.edit_message_text("❌ No creator options available. Please search again.")
+        return
+    
+    # Extract the selected index
+    try:
+        selected_idx = int(data.split("|")[1])
+        selected_option = session.pending_creator_options[selected_idx]
+    except (IndexError, ValueError):
+        await query.edit_message_text("❌ Invalid selection. Please try again.")
+        return
+    
+    # Extract creator name from title (clean it up)
+    from scrapers.simpcity_search import extract_creator_name_from_title
+    creator_title = selected_option['name']
+    creator_name = extract_creator_name_from_title(creator_title)
+    creator_url = selected_option['url']
+    
+    # Show confirmation (without mentioning source)
+    confirm_text = f"""
+✅ **Selected:**
+
+📝 {creator_title[:100]}
+👤 Creator: {creator_name}
+💬 Replies: {selected_option.get('replies', 0)}
+
+➕ This creator will be added to your database for faster future searches.
+
+⏳ Loading content...
+    """
+    
+    await query.edit_message_text(confirm_text, parse_mode='Markdown')
+    
+    # Add creator to CSV (silently)
+    try:
+        bot_instance.content_manager.scraper.add_creator_to_csv(creator_name, creator_url)
+        logger.info(f"Added creator to CSV: {creator_name}")
+    except Exception as e:
+        logger.error(f"Failed to add creator to CSV: {e}")
+    
+    # Import asyncio for progress messages
+    import asyncio
+    
+    # Progress messages
+    filler_messages = [
+        f"⏳ Fetching content for {creator_name}...",
+        f"⏳ Processing data...",
+        f"⏳ Extracting media...",
+        f"⏳ Almost ready..."
+    ]
+    
+    # Create a task for fetching content
+    fetch_task = asyncio.create_task(
+        bot_instance.content_manager.search_creator_content(
+            creator_name,
+            session.filters,
+            direct_url=creator_url
+        )
+    )
+    
+    # Show filler messages while fetching
+    message_index = 0
+    while not fetch_task.done():
+        try:
+            await asyncio.sleep(2)
+            if not fetch_task.done() and message_index < len(filler_messages):
+                await query.edit_message_text(filler_messages[message_index])
+                message_index += 1
+        except Exception:
+            pass
+    
+    # Get the result
+    try:
+        content_directory = await fetch_task
+        
+        if not content_directory:
+            await query.edit_message_text(
+                f"❌ Failed to load content for '{creator_name}'.\n\n"
+                "The thread may be empty or unavailable. Please try another option."
+            )
+            return
+        
+        # Update session
+        session.current_directory = content_directory
+        session.current_creator = creator_name
+        
+        # Display content directory
+        total_pictures = len(content_directory.get('preview_images', []))
+        total_videos = len(content_directory.get('video_links', []))
+        total_pages = content_directory.get('total_pages', 1)
+        end_page = content_directory.get('end_page', 1)
+        has_more_pages = end_page < total_pages
+        directory_text = format_directory_text(creator_name, content_directory, session.filters)
+        
+        # Create keyboard
+        keyboard = []
+        
+        if total_pictures > 0:
+            keyboard.append([InlineKeyboardButton(f"🖼️ View Pictures ({total_pictures})", callback_data="view_pictures")])
+        
+        if total_videos > 0:
+            keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+        
+        if has_more_pages:
+            keyboard.append([InlineKeyboardButton("⬇️ Load More Content", callback_data="load_more_pages")])
+        
+        keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await send_message_with_retry(
+            query.message.reply_text,
+            directory_text,
+            reply_markup=reply_markup
+        )
+        
+        # Delete the selection message
+        try:
+            await query.delete_message()
+        except (TimedOut, NetworkError, BadRequest):
+            pass
+        
+        # Clear pending options
+        session.pending_creator_options = None
+        session.pending_creator_name = None
+        session.is_simpcity_search = False
+        
+    except Exception as e:
+        logger.error(f"Error loading SimpCity creator: {e}")
+        await query.edit_message_text(
+            f"❌ An error occurred while loading content.\n\n"
             "Please try again later."
         )
 
@@ -453,7 +656,6 @@ async def handle_download_request(query, session, data: str, bot_instance) -> No
 
 📄 Content: {title}
 🎬 Type: {item.get('type', 'Unknown')}
-🌐 Domain: {item.get('domain', 'Unknown')}
 
 🔗 **Download URL:**
 `{download_link}`
@@ -592,7 +794,6 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
         
         message_text = f"""
 🖼️ **Picture #{idx + 1}**
-📦 Domain: {domain}
 
 🔗 Click link below to view full image:
 {image_url}
@@ -823,7 +1024,6 @@ async def handle_picture_details(query, session, data: str) -> None:
     details_text = f"""
 🖼️ Picture #{picture_idx + 1}
 
-🌐 Domain: {picture.get('domain', 'Unknown')}
 🔗 URL: {picture.get('url', 'N/A')[:150]}
 
 Click the button below to get the direct link.
@@ -905,7 +1105,6 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
         
         message_text = f"""🎬 {title}
 
-📦 Domain: {domain}
 🔗 Link: {video_url}
 
 💡 Click the link above to view or download the video."""

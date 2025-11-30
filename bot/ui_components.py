@@ -128,7 +128,6 @@ def format_content_details_text(item: dict, content_idx: int) -> str:
 📝 {title}
 
 📁 Type: {item.get('type', 'Unknown')}
-🌐 Domain: {item.get('domain', 'Unknown')}
 🔗 URL: {item.get('url', 'N/A')[:100]}
     """
 
