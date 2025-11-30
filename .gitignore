@@ -9,3 +9,4 @@ content_domains.txt
 # Ignore .env file (commonly used for environment variables)
 .env
 env/
+coomer.json

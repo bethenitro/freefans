@@ -104,6 +104,16 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await handle_picture_link(query, session, data)
     elif data.startswith("picture_"):
         await handle_picture_details(query, session, data)
+    elif data == "view_of_feed":
+        await handle_view_of_feed(query, session, bot_instance)
+    elif data.startswith("of_feed_page_"):
+        await handle_of_feed_page(query, session, data, bot_instance)
+    elif data.startswith("of_feed_skip_"):
+        await handle_of_feed_skip_menu(query, session, data)
+    elif data.startswith("of_feed_goto_"):
+        await handle_of_feed_goto(query, session, data, bot_instance)
+    elif data.startswith("of_feed_cancel_"):
+        await handle_of_feed_cancel(query, session, data)
 
 
 async def handle_search_creator(query) -> None:
@@ -264,6 +274,8 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         total_pages = content_directory.get('total_pages', 1)
         end_page = content_directory.get('end_page', 1)
         has_more_pages = end_page < total_pages  # Show if not all pages fetched
+        social_links = content_directory.get('social_links', {})
+        has_onlyfans = social_links.get('onlyfans') is not None
         directory_text = format_directory_text(creator_name, content_directory, session.filters)
         
         # Create keyboard
@@ -274,6 +286,10 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         
         if total_videos > 0:
             keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+        
+        # Add OF Feed button if OnlyFans link is available
+        if has_onlyfans:
+            keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
         
         # Always show Load More if more content available
         if has_more_pages:
@@ -392,6 +408,8 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
         total_pages = content_directory.get('total_pages', 1)
         end_page = content_directory.get('end_page', 1)
         has_more_pages = end_page < total_pages
+        social_links = content_directory.get('social_links', {})
+        has_onlyfans = social_links.get('onlyfans') is not None
         directory_text = format_directory_text(creator_name, content_directory, session.filters)
         
         # Create keyboard
@@ -402,6 +420,10 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
         
         if total_videos > 0:
             keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+        
+        # Add OF Feed button if OnlyFans link is available
+        if has_onlyfans:
+            keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
         
         if has_more_pages:
             keyboard.append([InlineKeyboardButton("⬇️ Load More Content", callback_data="load_more_pages")])
@@ -461,6 +483,8 @@ async def display_content_directory_from_callback(query, session, content_direct
     total_pictures = len(content_directory.get('preview_images', []))
     total_videos = len(content_directory.get('video_links', []))
     has_more_pages = content_directory.get('has_more_pages', False)
+    social_links = content_directory.get('social_links', {})
+    has_onlyfans = social_links.get('onlyfans') is not None
     directory_text = format_directory_text(creator_name, content_directory, session.filters)
     
     # Create keyboard with only Pictures and Videos buttons (no content items)
@@ -471,6 +495,10 @@ async def display_content_directory_from_callback(query, session, content_direct
     
     if total_videos > 0:
         keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+    
+    # Add OF Feed button if OnlyFans link is available
+    if has_onlyfans:
+        keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
     
     # Add "Load More" button if there are more pages available
     if has_more_pages:
@@ -533,6 +561,8 @@ async def handle_load_more_pages(query, session, bot_instance) -> None:
             total_pictures = len(updated_content.get('preview_images', []))
             total_videos = len(updated_content.get('video_links', []))
             has_more_pages = updated_content.get('has_more_pages', False)
+            social_links = updated_content.get('social_links', {})
+            has_onlyfans = social_links.get('onlyfans') is not None
             directory_text = format_directory_text(creator_name, updated_content, session.filters)
             
             # Create keyboard
@@ -543,6 +573,10 @@ async def handle_load_more_pages(query, session, bot_instance) -> None:
             
             if total_videos > 0:
                 keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+            
+            # Add OF Feed button if OnlyFans link is available
+            if has_onlyfans:
+                keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
             
             # Add "Load More" button if there is still more content
             if has_more_pages:
@@ -731,6 +765,8 @@ async def handle_back_to_list(query, session) -> None:
     total_pictures = len(content_directory.get('preview_images', []))
     total_videos = len(content_directory.get('video_links', []))
     has_more_pages = content_directory.get('has_more_pages', False)
+    social_links = content_directory.get('social_links', {})
+    has_onlyfans = social_links.get('onlyfans') is not None
     
     directory_text = format_directory_text(creator_name, content_directory, session.filters)
     
@@ -742,6 +778,10 @@ async def handle_back_to_list(query, session) -> None:
     
     if total_videos > 0:
         keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+    
+    # Add OF Feed button if OnlyFans link is available
+    if has_onlyfans:
+        keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
     
     # Add "Load More" button if there are more pages available
     if has_more_pages:
@@ -1298,3 +1338,515 @@ async def handle_video_goto(query, session, data: str) -> None:
     """Go to specific video page."""
     page = int(data.split("_")[2])
     await handle_view_videos(query, session, page)
+
+
+async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> None:
+    """Show OnlyFans feed posts from Coomer API."""
+    if not session.current_directory:
+        await query.edit_message_text("❌ No content directory available.")
+        return
+    
+    # Extract OnlyFans username from social links
+    social_links = session.current_directory.get('social_links', {})
+    onlyfans_link = social_links.get('onlyfans')
+    
+    if not onlyfans_link:
+        await query.edit_message_text(
+            "❌ No OnlyFans link found for this creator.\n\n"
+            "The archived feed feature requires an OnlyFans profile link to be available."
+        )
+        return
+    
+    # Extract username from OnlyFans URL
+    import re
+    username_match = re.search(r'onlyfans\.com/([^/?]+)', onlyfans_link)
+    if not username_match:
+        await query.edit_message_text("❌ Could not extract OnlyFans username from link.")
+        return
+    
+    username = username_match.group(1)
+    
+    # Show loading message
+    await query.edit_message_text(f"⏳ Loading archived OF Feed for @{username}...")
+    
+    try:
+        # Fetch posts from Coomer API
+        import httpx
+        import json
+        import asyncio
+        
+        # Small delay to avoid rate limiting
+        await asyncio.sleep(1)
+        
+        api_url = f"https://coomer.st/api/v1/onlyfans/user/{username}/posts"
+        
+        # Add headers and cookies to mimic a browser request and bypass DDoS-Guard
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0',
+            'Accept': 'text/css',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Referer': f'https://coomer.st/onlyfans/user/{username}',
+            'Sec-GPC': '1',
+            'Connection': 'keep-alive',
+            'Cookie': '__ddg8_=oYZ5VQJk5kVaS0OW; __ddg10_=1764498146; __ddg9_=169.150.196.144; __ddg1_=MG8yyPWZPYJxBTqS1VhW; thumbSize=180',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'Priority': 'u=4',
+            'TE': 'trailers',
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            # Try up to 2 times with different delays
+            for attempt in range(2):
+                try:
+                    logger.info(f"Fetching OF Feed for {username}, attempt {attempt + 1}")
+                    response = await client.get(api_url, headers=headers)
+                    logger.info(f"Response status: {response.status_code}")
+                    break
+                except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                    if attempt < 1:
+                        logger.warning(f"Attempt {attempt + 1} failed: {e}, retrying...")
+                        await asyncio.sleep(2)
+                        continue
+                    else:
+                        raise
+            
+            if response.status_code == 404:
+                await query.edit_message_text(
+                    f"❌ No archived feed found for @{username}.\n\n"
+                    "This creator may not be available in the archive database."
+                )
+                return
+            
+            if response.status_code == 403:
+                # Try alternative approach: provide direct link and explain
+                await query.edit_message_text(
+                    f"⚠️ **Access Currently Unavailable**\n\n"
+                    f"The archive database is currently blocking automated requests for @{username}.\n\n"
+                    f"**View Feed Manually:**\n"
+                    f"You can browse the archived OnlyFans feed directly by opening this link in your browser:\n\n"
+                    f"🔗 `https://coomer.st/onlyfans/user/{username}`\n\n"
+                    f"💡 **Note:** The link provides access to all archived posts, photos, and videos from this creator's OnlyFans.",
+                    parse_mode='Markdown',
+                    disable_web_page_preview=False
+                )
+                return
+            
+            if response.status_code != 200:
+                await query.edit_message_text(
+                    f"❌ Failed to fetch OF Feed (Status: {response.status_code}).\n\n"
+                    "Please try again later."
+                )
+                return
+            
+            posts = response.json()
+            
+            # Save to coomer.json for reference
+            with open('coomer.json', 'w', encoding='utf-8') as f:
+                json.dump(posts, f, indent=2, ensure_ascii=False)
+            
+            if not posts or len(posts) == 0:
+                await query.edit_message_text(
+                    f"📭 No archived posts found for @{username}.\n\n"
+                    "The feed may be empty or not yet archived."
+                )
+                return
+            
+            # Store posts in session for pagination
+            session.of_feed_posts = posts
+            session.of_feed_username = username
+            
+            # Display posts
+            await display_of_feed_page(query, session, page)
+            
+    except httpx.TimeoutException:
+        await query.edit_message_text("❌ Request timed out. The archive server may be slow. Please try again.")
+    except Exception as e:
+        logger.error(f"Error fetching archived feed: {e}")
+        await query.edit_message_text("❌ An error occurred while fetching the archived feed.")
+
+
+async def display_of_feed_page(query, session, page: int) -> None:
+    """Display a page of OF Feed posts with clickable links."""
+    posts = session.of_feed_posts
+    username = session.of_feed_username
+    
+    items_per_page = 5
+    total_pages = (len(posts) + items_per_page - 1) // items_per_page
+    
+    if page < 0:
+        page = 0
+    elif page >= total_pages:
+        page = total_pages - 1
+    
+    start_idx = page * items_per_page
+    end_idx = min(start_idx + items_per_page, len(posts))
+    page_posts = posts[start_idx:end_idx]
+    
+    # First, send header message
+    from datetime import datetime
+    import httpx
+    
+    header_text = f"📱 **OF Feed: @{username}**\n\n"
+    header_text += f"📄 Showing posts {start_idx + 1}-{end_idx} of {len(posts)}\n"
+    header_text += f"📖 Page {page + 1} of {total_pages}\n\n"
+    header_text += "Loading media..."
+    
+    # Delete the old message and send new header
+    try:
+        await query.delete_message()
+    except:
+        pass
+    
+    await query.message.reply_text(header_text, parse_mode='Markdown')
+    
+    # Headers for fetching post details
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0',
+        'Accept': 'text/css',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'Sec-GPC': '1',
+        'Connection': 'keep-alive',
+        'Cookie': '__ddg1_=MG8yyPWZPYJxBTqS1VhW; thumbSize=180; __ddg8_=905mgO0m7doV7p57; __ddg10_=1764511244; __ddg9_=169.150.196.144',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+    }
+    
+    # Send each post with actual media
+    for idx, post in enumerate(page_posts, start=start_idx):
+        try:
+            post_id = post.get('id', '')
+            
+            # Fetch detailed post data to get media URLs
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                post_detail_url = f"https://coomer.st/api/v1/onlyfans/user/{username}/post/{post_id}"
+                headers['Referer'] = f'https://coomer.st/onlyfans/user/{username}/post/{post_id}'
+                
+                response = await client.get(post_detail_url, headers=headers)
+                
+                if response.status_code != 200:
+                    logger.warning(f"Failed to fetch post {post_id}: {response.status_code}")
+                    continue
+                
+                post_detail = response.json()
+                post_data = post_detail.get('post', {})
+                
+                # Parse date
+                published = post_data.get('published', '')
+                try:
+                    post_date = datetime.fromisoformat(published.replace('Z', '+00:00'))
+                    date_str = post_date.strftime('%B %d, %Y')
+                except:
+                    date_str = 'Unknown date'
+                
+                # Get title or content
+                title = post_data.get('title', '').strip()
+                content = post_data.get('content', '').strip()
+                
+                # Escape markdown special characters
+                def escape_text(text):
+                    # Remove or escape problematic characters for Markdown
+                    for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
+                        text = text.replace(char, '')
+                    return text
+                
+                caption = f"Post #{idx + 1} - {date_str}"
+                if title:
+                    caption += f"\n{escape_text(title)}"
+                elif content:
+                    # Truncate content if too long
+                    if len(content) > 200:
+                        content = content[:197] + '...'
+                    caption += f"\n{escape_text(content)}"
+                
+                # Get main file
+                file_info = post_data.get('file', {})
+                
+                # Get attachments
+                attachments_list = post_detail.get('attachments', [])
+                
+                # Get videos
+                videos_list = post_detail.get('videos', [])
+                
+                # Collect all media URLs
+                media_items = []
+                
+                # Add main file if exists
+                if file_info and file_info.get('path'):
+                    # Use img.coomer.st for images
+                    file_url = f"https://img.coomer.st/thumbnail/data{file_info['path']}"
+                    file_name = file_info.get('name', '')
+                    
+                    # Determine if image or video based on extension
+                    if any(file_name.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+                        media_items.append(('photo', file_url))
+                    elif any(file_name.lower().endswith(ext) for ext in ['.mp4', '.mov', '.avi', '.webm']):
+                        # Videos use coomer.st domain
+                        file_url = f"https://coomer.st/data{file_info['path']}"
+                        media_items.append(('video', file_url))
+                
+                # Add videos
+                for video in videos_list:
+                    if video.get('path'):
+                        video_url = f"https://coomer.st/data{video['path']}"
+                        media_items.append(('video', video_url))
+                
+                # Add attachments
+                for attachment in attachments_list:
+                    if attachment.get('path'):
+                        attach_name = attachment.get('name', '')
+                        
+                        if any(attach_name.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+                            attach_url = f"https://img.coomer.st/thumbnail/data{attachment['path']}"
+                            media_items.append(('photo', attach_url))
+                        elif any(attach_name.lower().endswith(ext) for ext in ['.mp4', '.mov', '.avi', '.webm']):
+                            attach_url = f"https://coomer.st/data{attachment['path']}"
+                            media_items.append(('video', attach_url))
+                
+                # Send media to Telegram
+                if media_items:
+                    for media_type, media_url in media_items:
+                        try:
+                            # Send as text message with link and enable preview
+                            media_icon = "🖼️" if media_type == 'photo' else "🎬"
+                            message_text = f"{caption}\n\n{media_icon} Media Link:\n{media_url}" if caption else f"{media_icon} Media Link:\n{media_url}"
+                            
+                            await query.message.reply_text(
+                                message_text,
+                                disable_web_page_preview=False  # Enable preview to show thumbnails
+                            )
+                            
+                            # Only send caption with first media item
+                            caption = None
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to send media link for post {post_id}: {e}")
+                else:
+                    # No media, send text-only message
+                    await query.message.reply_text(
+                        f"{caption}\n\n💬 Text-only post"
+                    )
+        
+        except Exception as e:
+            logger.error(f"Error processing OF feed post {idx + 1}: {e}")
+            continue
+    
+    # Send navigation message at the end
+    nav_text = f"\n� Page {page + 1} of {total_pages}\n\nUse the buttons below to navigate:"
+    
+    keyboard = []
+    nav_buttons = []
+    
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"of_feed_page_{page - 1}"))
+    
+    # Add skip/jump button if more than 3 pages
+    if total_pages > 3:
+        nav_buttons.append(InlineKeyboardButton("⏩ Jump to Page", callback_data=f"of_feed_skip_{page}"))
+    
+    if end_idx < len(posts):
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"of_feed_page_{page + 1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    keyboard.append([InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_list")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.message.reply_text(nav_text, reply_markup=reply_markup)
+
+
+async def handle_of_feed_page(query, session, data: str, bot_instance) -> None:
+    """Handle OF Feed page navigation."""
+    page = int(data.split("_")[3])
+    
+    if not hasattr(session, 'of_feed_posts') or not session.of_feed_posts:
+        await query.edit_message_text("❌ Archived feed data not available. Please reload the feed.")
+        return
+    
+    await display_of_feed_page(query, session, page)
+
+
+async def handle_of_feed_skip_menu(query, session, data: str) -> None:
+    """Show smart menu to skip to a specific page in OF Feed."""
+    current_page = int(data.split("_")[3])
+    
+    if not hasattr(session, 'of_feed_posts') or not session.of_feed_posts:
+        await query.edit_message_text("❌ Archived feed data not available.")
+        return
+    
+    posts = session.of_feed_posts
+    username = session.of_feed_username
+    items_per_page = 5
+    total_pages = (len(posts) + items_per_page - 1) // items_per_page
+    
+    skip_text = f"""
+⏩ **Jump to Page**
+
+📊 Total: {len(posts)} posts
+📄 Pages: {total_pages} (5 posts per page)
+📍 Currently on: Page {current_page + 1}
+
+Select a page to jump to:
+    """
+    
+    keyboard = []
+    
+    # Smart pagination based on total pages
+    if total_pages <= 25:
+        # If 25 or fewer pages, show all (5 per row)
+        for i in range(0, total_pages, 5):
+            row = []
+            for j in range(i, min(i + 5, total_pages)):
+                # Highlight current page
+                if j == current_page:
+                    row.append(InlineKeyboardButton(f"• {j + 1} •", callback_data=f"of_feed_goto_{j}"))
+                else:
+                    row.append(InlineKeyboardButton(f"{j + 1}", callback_data=f"of_feed_goto_{j}"))
+            keyboard.append(row)
+    
+    elif total_pages <= 50:
+        # For 26-50 pages: Show first 10, middle section with intervals, last 10
+        row = []
+        
+        # First 10 pages (compacted)
+        for i in range(0, min(10, total_pages)):
+            if i == current_page:
+                row.append(InlineKeyboardButton(f"• {i + 1} •", callback_data=f"of_feed_goto_{i}"))
+            else:
+                row.append(InlineKeyboardButton(f"{i + 1}", callback_data=f"of_feed_goto_{i}"))
+            if len(row) == 5:
+                keyboard.append(row)
+                row = []
+        
+        if row:
+            keyboard.append(row)
+            row = []
+        
+        # Middle pages with intervals of 5
+        if total_pages > 20:
+            for i in range(10, total_pages - 10, 5):
+                if i == current_page:
+                    row.append(InlineKeyboardButton(f"• {i + 1} •", callback_data=f"of_feed_goto_{i}"))
+                else:
+                    row.append(InlineKeyboardButton(f"{i + 1}", callback_data=f"of_feed_goto_{i}"))
+                if len(row) == 5:
+                    keyboard.append(row)
+                    row = []
+        
+        if row:
+            keyboard.append(row)
+            row = []
+        
+        # Last 10 pages
+        for i in range(max(10, total_pages - 10), total_pages):
+            if i == current_page:
+                row.append(InlineKeyboardButton(f"• {i + 1} •", callback_data=f"of_feed_goto_{i}"))
+            else:
+                row.append(InlineKeyboardButton(f"{i + 1}", callback_data=f"of_feed_goto_{i}"))
+            if len(row) == 5:
+                keyboard.append(row)
+                row = []
+        
+        if row:
+            keyboard.append(row)
+    
+    else:
+        # For 50+ pages: Show key pages with smart intervals
+        pages_to_show = []
+        
+        # Always show first 5
+        pages_to_show.extend(range(0, min(5, total_pages)))
+        
+        # Show pages around current page
+        if current_page >= 5:
+            start = max(5, current_page - 2)
+            end = min(total_pages - 5, current_page + 3)
+            pages_to_show.extend(range(start, end))
+        
+        # Show every 10th page in the middle
+        for i in range(10, total_pages - 10, 10):
+            if i not in pages_to_show:
+                pages_to_show.append(i)
+        
+        # Always show last 5
+        pages_to_show.extend(range(max(5, total_pages - 5), total_pages))
+        
+        # Remove duplicates and sort
+        pages_to_show = sorted(set(pages_to_show))
+        
+        # Create buttons (4 per row for better fit)
+        row = []
+        for page_idx in pages_to_show:
+            if page_idx == current_page:
+                row.append(InlineKeyboardButton(f"• {page_idx + 1} •", callback_data=f"of_feed_goto_{page_idx}"))
+            else:
+                row.append(InlineKeyboardButton(f"{page_idx + 1}", callback_data=f"of_feed_goto_{page_idx}"))
+            if len(row) == 4:
+                keyboard.append(row)
+                row = []
+        
+        if row:
+            keyboard.append(row)
+    
+    # Add cancel button
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data=f"of_feed_cancel_{current_page}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(skip_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+
+async def handle_of_feed_goto(query, session, data: str, bot_instance) -> None:
+    """Go to specific OF Feed page."""
+    page = int(data.split("_")[3])
+    await display_of_feed_page(query, session, page)
+
+
+async def handle_of_feed_cancel(query, session, data: str) -> None:
+    """Cancel OF Feed skip and return to navigation."""
+    current_page = int(data.split("_")[3])
+    await show_of_feed_navigation(query, session, current_page)
+
+
+async def show_of_feed_navigation(query, session, page: int) -> None:
+    """Show only the navigation menu for OF Feed without re-sending posts."""
+    if not hasattr(session, 'of_feed_posts') or not session.of_feed_posts:
+        await query.edit_message_text("❌ Archived feed data not available.")
+        return
+    
+    posts = session.of_feed_posts
+    items_per_page = 5
+    total_pages = (len(posts) + items_per_page - 1) // items_per_page
+    
+    start_idx = page * items_per_page
+    end_idx = min(start_idx + items_per_page, len(posts))
+    
+    # Just show navigation message
+    nav_text = f"\n📄 Page {page + 1} of {total_pages}\n\nUse the buttons below to navigate:"
+    
+    keyboard = []
+    nav_buttons = []
+    
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"of_feed_page_{page - 1}"))
+    
+    if total_pages > 3:
+        nav_buttons.append(InlineKeyboardButton("⏩ Jump to Page", callback_data=f"of_feed_skip_{page}"))
+    
+    if end_idx < len(posts):
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"of_feed_page_{page + 1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    keyboard.append([InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_list")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(nav_text, reply_markup=reply_markup)
+
+

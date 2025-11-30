@@ -252,6 +252,7 @@ class SimilarityCalculator:
 def search_model_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv') -> Optional[Tuple[str, str, float]]:
     """
     Search for a creator in the CSV file using advanced similarity algorithms.
+    Handles multi-alias names (separated by |) by checking each alias individually.
     Returns (matched_name, url, similarity_score) or None
     """
     try:
@@ -266,17 +267,27 @@ def search_model_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv'
                 model_name = row['model_name']
                 profile_link = row['profile_link']
                 
-                # Calculate composite similarity
-                similarity = calculator.calculate_composite_similarity(creator_name, model_name)
+                # Split by '|' to get individual aliases
+                aliases = [alias.strip() for alias in model_name.split('|')]
                 
-                # Exact match detection (after normalization)
-                if similarity >= 0.99:
-                    logger.info(f"Exact match found: '{creator_name}' -> '{model_name}' (score: {similarity:.3f})")
-                    return (model_name, profile_link, 1.0)
+                # Check similarity against each alias
+                max_alias_similarity = 0.0
+                for alias in aliases:
+                    if not alias:  # Skip empty aliases
+                        continue
+                    
+                    similarity = calculator.calculate_composite_similarity(creator_name, alias)
+                    max_alias_similarity = max(max_alias_similarity, similarity)
+                    
+                    # Exact match detection (after normalization)
+                    if similarity >= 0.99:
+                        logger.info(f"Exact match found: '{creator_name}' -> '{alias}' in '{model_name}' (score: {similarity:.3f})")
+                        return (model_name, profile_link, 1.0)
                 
-                if similarity > best_score:
-                    best_score = similarity
-                    best_match = (model_name, profile_link, similarity)
+                # Use the best alias match for this row
+                if max_alias_similarity > best_score:
+                    best_score = max_alias_similarity
+                    best_match = (model_name, profile_link, max_alias_similarity)
         
         # Only return matches with at least 50% similarity
         if best_match and best_score >= 0.5:
@@ -294,6 +305,7 @@ def search_model_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv'
 def search_multiple_models_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv', max_results: int = 5) -> List[Tuple[str, str, float]]:
     """
     Search for multiple potential matches in the CSV file using advanced similarity.
+    Handles multi-alias names (separated by |) by checking each alias individually.
     Returns list of (matched_name, url, similarity_score) tuples, sorted by similarity
     """
     try:
@@ -306,17 +318,26 @@ def search_multiple_models_in_csv(creator_name: str, csv_path: str = 'onlyfans_m
                 model_name = row['model_name']
                 profile_link = row['profile_link']
                 
-                # Calculate composite similarity
-                similarity = calculator.calculate_composite_similarity(creator_name, model_name)
+                # Split by '|' to get individual aliases
+                aliases = [alias.strip() for alias in model_name.split('|')]
                 
-                # Exact match - return immediately
-                if similarity >= 0.99:
-                    logger.info(f"Exact match found: '{creator_name}' -> '{model_name}'")
-                    return [(model_name, profile_link, 1.0)]
+                # Check similarity against each alias
+                max_alias_similarity = 0.0
+                for alias in aliases:
+                    if not alias:  # Skip empty aliases
+                        continue
+                    
+                    similarity = calculator.calculate_composite_similarity(creator_name, alias)
+                    max_alias_similarity = max(max_alias_similarity, similarity)
+                    
+                    # Exact match - return immediately
+                    if similarity >= 0.99:
+                        logger.info(f"Exact match found: '{creator_name}' -> '{alias}' in '{model_name}'")
+                        return [(model_name, profile_link, 1.0)]
                 
-                # Include matches with at least 50% similarity for multiple results
-                if similarity >= 0.5:
-                    matches.append((model_name, profile_link, similarity))
+                # Use the best alias match for this row
+                if max_alias_similarity >= 0.5:
+                    matches.append((model_name, profile_link, max_alias_similarity))
         
         # Sort by similarity (highest first) and return top results
         matches.sort(key=lambda x: x[2], reverse=True)
