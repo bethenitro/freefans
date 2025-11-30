@@ -6,9 +6,61 @@ import httpx
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Tuple
+from datetime import datetime, timedelta
 import re
 
 logger = logging.getLogger(__name__)
+
+# HTTP response cache to avoid refetching same pages
+_http_response_cache = {}
+_http_cache_ttl = timedelta(minutes=10)  # Cache HTTP responses for 10 minutes
+_http_cache_max_size = 100
+
+
+def _get_http_cache_key(url: str) -> str:
+    """Generate cache key for HTTP response."""
+    return url
+
+
+def _clean_http_cache():
+    """Remove expired entries from HTTP cache."""
+    global _http_response_cache
+    now = datetime.now()
+    expired_keys = [
+        key for key, value in _http_response_cache.items()
+        if now - value['timestamp'] > _http_cache_ttl
+    ]
+    for key in expired_keys:
+        del _http_response_cache[key]
+        logger.debug(f"Removed expired HTTP cache entry: {key}")
+    
+    # If cache is too large, remove oldest entries
+    if len(_http_response_cache) > _http_cache_max_size:
+        sorted_items = sorted(_http_response_cache.items(), key=lambda x: x[1]['timestamp'])
+        for key, _ in sorted_items[:len(_http_response_cache) - _http_cache_max_size]:
+            del _http_response_cache[key]
+            logger.debug(f"Removed old HTTP cache entry: {key}")
+
+
+def _get_cached_response(url: str) -> Optional[str]:
+    """Get cached HTTP response if available."""
+    _clean_http_cache()
+    cache_key = _get_http_cache_key(url)
+    
+    if cache_key in _http_response_cache:
+        logger.info(f"✓ HTTP cache hit for {url}")
+        return _http_response_cache[cache_key]['data']
+    return None
+
+
+def _cache_response(url: str, data: str):
+    """Cache HTTP response."""
+    cache_key = _get_http_cache_key(url)
+    _http_response_cache[cache_key] = {
+        'data': data,
+        'timestamp': datetime.now()
+    }
+    logger.debug(f"✓ Cached HTTP response for {url} (cache size: {len(_http_response_cache)})")
 
 
 class HTTPFetcher:
@@ -17,6 +69,18 @@ class HTTPFetcher:
         headers, cookies = self._load_curl_config(curl_config_path)
         self.headers = headers
         self.cookies = cookies
+        
+        # Create a shared async client with connection pooling for better performance
+        # Connection limits optimized for concurrent requests
+        # Increased from 10/20 to 20/50 for better throughput
+        limits = httpx.Limits(
+            max_keepalive_connections=20,
+            max_connections=50,
+            keepalive_expiry=30.0
+        )
+        
+        self._client = None
+        self._limits = limits
     
     def _load_curl_config(self, config_path: str) -> Tuple[Dict[str, str], Dict[str, str]]:
         """Parse curl_config.txt and extract headers and cookies."""
@@ -83,16 +147,45 @@ class HTTPFetcher:
         return headers, cookies
     
     async def fetch_page(self, url: str) -> Optional[str]:
-        """Fetch a page from a URL with headers and cookies."""
+        """Fetch a page from a URL with headers and cookies using connection pooling."""
         try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.get(
-                    url, 
+            # Check cache first
+            cached_response = _get_cached_response(url)
+            if cached_response is not None:
+                return cached_response
+            
+            # Create client lazily if it doesn't exist
+            if self._client is None:
+                self._client = httpx.AsyncClient(
+                    timeout=30.0,
+                    follow_redirects=True,
+                    limits=self._limits,
                     headers=self.headers,
                     cookies=self.cookies
                 )
-                response.raise_for_status()
-                return response.text
+            
+            response = await self._client.get(url)
+            response.raise_for_status()
+            
+            # Cache the response
+            response_text = response.text
+            _cache_response(url, response_text)
+            
+            return response_text
         except Exception as e:
             logger.error(f"Error fetching page {url}: {e}")
             return None
+    
+    async def close(self):
+        """Close the HTTP client connection pool."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.close()

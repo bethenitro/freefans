@@ -6,3 +6,4 @@ lxml==6.0.2
 
 # Additional dependencies
 python-dateutil==2.9.0
+rapidfuzz==3.10.1  # Fast fuzzy string matching

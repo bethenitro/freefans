@@ -103,6 +103,15 @@ def main():
         print("TELEGRAM_BOT_TOKEN=your_bot_token_here")
         return
     
+    # Preload CSV cache for faster searches
+    print("📂 Preloading CSV cache...")
+    from scrapers.csv_handler import preload_csv_cache
+    try:
+        count = preload_csv_cache()
+        print(f"✅ Preloaded {count} models into cache")
+    except Exception as e:
+        print(f"⚠️ Warning: Failed to preload CSV cache: {e}")
+    
     # Create application with custom settings for better timeout handling
     application = (
         Application.builder()

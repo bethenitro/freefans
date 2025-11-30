@@ -7,12 +7,107 @@ import re
 import logging
 from typing import Optional, Tuple, List, Set
 from difflib import SequenceMatcher
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+from datetime import datetime, timedelta
+
+# Import rapidfuzz for faster fuzzy matching
+try:
+    from rapidfuzz import fuzz, process
+    RAPIDFUZZ_AVAILABLE = True
+except ImportError:
+    RAPIDFUZZ_AVAILABLE = False
+    logging.warning("rapidfuzz not available, falling back to difflib")
 
 logger = logging.getLogger(__name__)
 
+# Thread pool for CPU-bound CSV operations
+# Increased workers from 4 to 8 for better performance
+_csv_executor = ThreadPoolExecutor(max_workers=8)
+
+# In-memory cache for CSV data
+_csv_cache = {
+    'data': None,
+    'last_loaded': None,
+    'file_path': None
+}
+_cache_ttl = timedelta(minutes=5)  # Cache CSV for 5 minutes
+
+
+def _load_csv_to_memory(csv_path: str) -> List[dict]:
+    """Load CSV file into memory for faster access."""
+    global _csv_cache
+    
+    # Check if cache is valid
+    now = datetime.now()
+    if (_csv_cache['data'] is not None and 
+        _csv_cache['file_path'] == csv_path and
+        _csv_cache['last_loaded'] is not None and
+        now - _csv_cache['last_loaded'] < _cache_ttl):
+        logger.debug(f"Using cached CSV data ({len(_csv_cache['data'])} rows)")
+        return _csv_cache['data']
+    
+    # Load CSV into memory
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            data = list(reader)
+        
+        # Update cache
+        _csv_cache['data'] = data
+        _csv_cache['last_loaded'] = now
+        _csv_cache['file_path'] = csv_path
+        
+        logger.info(f"Loaded {len(data)} rows from CSV into memory cache")
+        return data
+    except Exception as e:
+        logger.error(f"Error loading CSV to memory: {e}")
+        return []
+
+
+def preload_csv_cache(csv_path: str = 'onlyfans_models.csv'):
+    """Preload CSV data into cache at startup for instant access."""
+    try:
+        data = _load_csv_to_memory(csv_path)
+        logger.info(f"Preloaded {len(data)} models into CSV cache")
+        return len(data)
+    except Exception as e:
+        logger.error(f"Failed to preload CSV cache: {e}")
+        return 0
+
+
+def clear_csv_cache():
+    """Clear the CSV cache (useful for testing or after CSV updates)."""
+    global _csv_cache
+    _csv_cache['data'] = None
+    _csv_cache['last_loaded'] = None
+    _csv_cache['file_path'] = None
+    logger.info("CSV cache cleared")
+
 
 class SimilarityCalculator:
-    """Advanced similarity calculator using multiple algorithms."""
+    """Advanced similarity calculator using multiple algorithms with caching."""
+    
+    # Class-level cache for similarity calculations
+    _similarity_cache = {}
+    _cache_max_size = 1000
+    
+    @staticmethod
+    def _get_cache_key(s1: str, s2: str) -> str:
+        """Generate cache key for similarity calculation."""
+        # Sort to ensure (a,b) and (b,a) produce same key
+        sorted_pair = tuple(sorted([s1.lower(), s2.lower()]))
+        return f"{sorted_pair[0]}||{sorted_pair[1]}"
+    
+    @staticmethod
+    def _clean_cache():
+        """Clean cache if it exceeds max size."""
+        if len(SimilarityCalculator._similarity_cache) > SimilarityCalculator._cache_max_size:
+            # Remove oldest 20% of entries
+            remove_count = SimilarityCalculator._cache_max_size // 5
+            keys_to_remove = list(SimilarityCalculator._similarity_cache.keys())[:remove_count]
+            for key in keys_to_remove:
+                del SimilarityCalculator._similarity_cache[key]
     
     @staticmethod
     def normalize_text(text: str) -> str:
@@ -196,14 +291,21 @@ class SimilarityCalculator:
     def calculate_composite_similarity(query: str, target: str) -> float:
         """
         Calculate composite similarity using multiple algorithms with weighted scoring.
+        Uses caching for repeated calculations.
         Returns a score between 0 and 1.
         """
+        # Check cache first
+        cache_key = SimilarityCalculator._get_cache_key(query, target)
+        if cache_key in SimilarityCalculator._similarity_cache:
+            return SimilarityCalculator._similarity_cache[cache_key]
+        
         # Normalize both strings for comparison
         query_norm = SimilarityCalculator.normalize_text(query)
         target_norm = SimilarityCalculator.normalize_text(target)
         
         # Exact match (after normalization)
         if query_norm == target_norm:
+            SimilarityCalculator._similarity_cache[cache_key] = 1.0
             return 1.0
         
         # Calculate different similarity metrics
@@ -246,13 +348,20 @@ class SimilarityCalculator:
         if len(query_norm) >= 3 and query_norm in target_norm.split():
             composite_score = max(composite_score, 0.85)
         
-        return min(composite_score, 1.0)
+        result = min(composite_score, 1.0)
+        
+        # Cache the result
+        SimilarityCalculator._similarity_cache[cache_key] = result
+        SimilarityCalculator._clean_cache()
+        
+        return result
 
 
 def search_model_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv') -> Optional[Tuple[str, str, float]]:
     """
     Search for a creator in the CSV file using advanced similarity algorithms.
     Handles multi-alias names (separated by |) by checking each alias individually.
+    Uses in-memory cache for faster access.
     Returns (matched_name, url, similarity_score) or None
     """
     try:
@@ -261,33 +370,34 @@ def search_model_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv'
         
         calculator = SimilarityCalculator()
         
-        with open(csv_path, 'r', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                model_name = row['model_name']
-                profile_link = row['profile_link']
+        # Load CSV from cache
+        rows = _load_csv_to_memory(csv_path)
+        
+        for row in rows:
+            model_name = row['model_name']
+            profile_link = row['profile_link']
+            
+            # Split by '|' to get individual aliases
+            aliases = [alias.strip() for alias in model_name.split('|')]
+            
+            # Check similarity against each alias
+            max_alias_similarity = 0.0
+            for alias in aliases:
+                if not alias:  # Skip empty aliases
+                    continue
                 
-                # Split by '|' to get individual aliases
-                aliases = [alias.strip() for alias in model_name.split('|')]
+                similarity = calculator.calculate_composite_similarity(creator_name, alias)
+                max_alias_similarity = max(max_alias_similarity, similarity)
                 
-                # Check similarity against each alias
-                max_alias_similarity = 0.0
-                for alias in aliases:
-                    if not alias:  # Skip empty aliases
-                        continue
-                    
-                    similarity = calculator.calculate_composite_similarity(creator_name, alias)
-                    max_alias_similarity = max(max_alias_similarity, similarity)
-                    
-                    # Exact match detection (after normalization)
-                    if similarity >= 0.99:
-                        logger.info(f"Exact match found: '{creator_name}' -> '{alias}' in '{model_name}' (score: {similarity:.3f})")
-                        return (model_name, profile_link, 1.0)
-                
-                # Use the best alias match for this row
-                if max_alias_similarity > best_score:
-                    best_score = max_alias_similarity
-                    best_match = (model_name, profile_link, max_alias_similarity)
+                # Exact match detection (after normalization)
+                if similarity >= 0.99:
+                    logger.info(f"Exact match found: '{creator_name}' -> '{alias}' in '{model_name}' (score: {similarity:.3f})")
+                    return (model_name, profile_link, 1.0)
+            
+            # Use the best alias match for this row
+            if max_alias_similarity > best_score:
+                best_score = max_alias_similarity
+                best_match = (model_name, profile_link, max_alias_similarity)
         
         # Only return matches with at least 50% similarity
         if best_match and best_score >= 0.5:
@@ -306,38 +416,40 @@ def search_multiple_models_in_csv(creator_name: str, csv_path: str = 'onlyfans_m
     """
     Search for multiple potential matches in the CSV file using advanced similarity.
     Handles multi-alias names (separated by |) by checking each alias individually.
+    Uses in-memory cache for faster access.
     Returns list of (matched_name, url, similarity_score) tuples, sorted by similarity
     """
     try:
         matches = []
         calculator = SimilarityCalculator()
         
-        with open(csv_path, 'r', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                model_name = row['model_name']
-                profile_link = row['profile_link']
+        # Load CSV from cache
+        rows = _load_csv_to_memory(csv_path)
+        
+        for row in rows:
+            model_name = row['model_name']
+            profile_link = row['profile_link']
+            
+            # Split by '|' to get individual aliases
+            aliases = [alias.strip() for alias in model_name.split('|')]
+            
+            # Check similarity against each alias
+            max_alias_similarity = 0.0
+            for alias in aliases:
+                if not alias:  # Skip empty aliases
+                    continue
                 
-                # Split by '|' to get individual aliases
-                aliases = [alias.strip() for alias in model_name.split('|')]
+                similarity = calculator.calculate_composite_similarity(creator_name, alias)
+                max_alias_similarity = max(max_alias_similarity, similarity)
                 
-                # Check similarity against each alias
-                max_alias_similarity = 0.0
-                for alias in aliases:
-                    if not alias:  # Skip empty aliases
-                        continue
-                    
-                    similarity = calculator.calculate_composite_similarity(creator_name, alias)
-                    max_alias_similarity = max(max_alias_similarity, similarity)
-                    
-                    # Exact match - return immediately
-                    if similarity >= 0.99:
-                        logger.info(f"Exact match found: '{creator_name}' -> '{alias}' in '{model_name}'")
-                        return [(model_name, profile_link, 1.0)]
-                
-                # Use the best alias match for this row
-                if max_alias_similarity >= 0.5:
-                    matches.append((model_name, profile_link, max_alias_similarity))
+                # Exact match - return immediately
+                if similarity >= 0.99:
+                    logger.info(f"Exact match found: '{creator_name}' -> '{alias}' in '{model_name}'")
+                    return [(model_name, profile_link, 1.0)]
+            
+            # Use the best alias match for this row
+            if max_alias_similarity >= 0.5:
+                matches.append((model_name, profile_link, max_alias_similarity))
         
         # Sort by similarity (highest first) and return top results
         matches.sort(key=lambda x: x[2], reverse=True)
@@ -352,3 +464,176 @@ def search_multiple_models_in_csv(creator_name: str, csv_path: str = 'onlyfans_m
     except Exception as e:
         logger.error(f"Error searching CSV for multiple matches: {e}")
         return []
+
+
+def _process_csv_chunk(chunk: List[dict], creator_name: str, calculator: SimilarityCalculator) -> List[Tuple[str, str, float]]:
+    """Process a chunk of CSV rows in parallel."""
+    matches = []
+    
+    for row in chunk:
+        model_name = row['model_name']
+        profile_link = row['profile_link']
+        
+        # Split by '|' to get individual aliases
+        aliases = [alias.strip() for alias in model_name.split('|')]
+        
+        # Check similarity against each alias
+        max_alias_similarity = 0.0
+        for alias in aliases:
+            if not alias:
+                continue
+            
+            similarity = calculator.calculate_composite_similarity(creator_name, alias)
+            max_alias_similarity = max(max_alias_similarity, similarity)
+            
+            # Exact match
+            if similarity >= 0.99:
+                return [(model_name, profile_link, 1.0, True)]  # True flag indicates exact match
+        
+        # Use the best alias match for this row
+        if max_alias_similarity >= 0.5:
+            matches.append((model_name, profile_link, max_alias_similarity, False))
+    
+    return matches
+
+
+async def search_multiple_models_in_csv_parallel(creator_name: str, csv_path: str = 'onlyfans_models.csv', max_results: int = 5) -> List[Tuple[str, str, float]]:
+    """
+    Search for multiple potential matches in CSV using parallel processing.
+    Much faster for large CSV files. Uses in-memory cache.
+    Returns list of (matched_name, url, similarity_score) tuples, sorted by similarity
+    """
+    try:
+        calculator = SimilarityCalculator()
+        
+        # Load CSV from cache (much faster)
+        all_rows = _load_csv_to_memory(csv_path)
+        
+        # If dataset is small, use sequential processing
+        if len(all_rows) < 1000:
+            return search_multiple_models_in_csv(creator_name, csv_path, max_results)
+        
+        # Split into chunks for parallel processing
+        chunk_size = max(100, len(all_rows) // 4)  # 4 workers
+        chunks = [all_rows[i:i + chunk_size] for i in range(0, len(all_rows), chunk_size)]
+        
+        # Process chunks in parallel using thread pool
+        loop = asyncio.get_event_loop()
+        tasks = [
+            loop.run_in_executor(_csv_executor, _process_csv_chunk, chunk, creator_name, calculator)
+            for chunk in chunks
+        ]
+        
+        # Gather results from all chunks
+        chunk_results = await asyncio.gather(*tasks)
+        
+        # Flatten results and check for exact matches
+        matches = []
+        for chunk_matches in chunk_results:
+            for match in chunk_matches:
+                # Check if exact match found (4th element is True)
+                if len(match) == 4 and match[3]:
+                    # Exact match found, return immediately
+                    logger.info(f"Exact match found: '{creator_name}' -> '{match[0]}'")
+                    return [(match[0], match[1], match[2])]
+                matches.append((match[0], match[1], match[2]))
+        
+        # Sort by similarity (highest first) and return top results
+        matches.sort(key=lambda x: x[2], reverse=True)
+        
+        if matches:
+            logger.info(f"Found {len(matches)} matches for '{creator_name}' (parallel search):")
+            for i, (name, _, score) in enumerate(matches[:max_results], 1):
+                logger.info(f"  {i}. '{name}' (score: {score:.3f})")
+        
+        return matches[:max_results]
+        
+    except Exception as e:
+        logger.error(f"Error in parallel CSV search: {e}")
+        # Fallback to sequential search
+        return search_multiple_models_in_csv(creator_name, csv_path, max_results)
+
+
+async def search_csv_with_rapidfuzz(creator_name: str, csv_path: str = 'onlyfans_models.csv', max_results: int = 5) -> List[Tuple[str, str, float]]:
+    """
+    Fast CSV search using rapidfuzz library.
+    Provides better performance for large datasets.
+    Returns list of (matched_name, url, similarity_score) tuples, sorted by similarity
+    """
+    if not RAPIDFUZZ_AVAILABLE:
+        logger.warning("rapidfuzz not available, using standard search")
+        return await search_multiple_models_in_csv_parallel(creator_name, csv_path, max_results)
+    
+    try:
+        # Load CSV from cache
+        all_rows = _load_csv_to_memory(csv_path)
+        
+        if not all_rows:
+            logger.warning(f"No data found in CSV: {csv_path}")
+            return []
+        
+        # Normalize query
+        from scrapers.fuzzy_search import FuzzySearchEngine
+        engine = FuzzySearchEngine()
+        query_norm = engine.normalize_name(creator_name)
+        
+        # Prepare data for fuzzy matching
+        # For each row, extract all aliases and create tuples of (normalized_alias, original_row)
+        candidates = []
+        for row in all_rows:
+            model_name = row['model_name']
+            profile_link = row['profile_link']
+            
+            # Split by '|' to get individual aliases
+            aliases = [alias.strip() for alias in model_name.split('|')]
+            
+            for alias in aliases:
+                if not alias:
+                    continue
+                alias_norm = engine.normalize_name(alias)
+                candidates.append((alias_norm, model_name, profile_link, alias))
+        
+        logger.info(f"Searching {len(candidates)} aliases with rapidfuzz for '{creator_name}'")
+        
+        # Use rapidfuzz's process.extract for fast matching
+        matches = process.extract(
+            query_norm,
+            [c[0] for c in candidates],
+            scorer=fuzz.WRatio,
+            limit=max_results * 2,  # Get more to deduplicate
+            score_cutoff=50  # Minimum 50% similarity
+        )
+        
+        # Map back to original data and deduplicate by profile_link
+        seen_urls = set()
+        results = []
+        
+        for normalized_match, score, idx in matches:
+            original_name = candidates[idx][1]
+            profile_link = candidates[idx][2]
+            matched_alias = candidates[idx][3]
+            
+            # Skip duplicates
+            if profile_link in seen_urls:
+                continue
+            
+            seen_urls.add(profile_link)
+            # Convert score from 0-100 to 0-1 for consistency
+            results.append((original_name, profile_link, score / 100.0))
+            
+            if len(results) >= max_results:
+                break
+        
+        if results:
+            logger.info(f"Rapidfuzz found {len(results)} matches for '{creator_name}':")
+            for i, (name, _, score) in enumerate(results, 1):
+                logger.info(f"  {i}. '{name}' (score: {score:.3f})")
+        else:
+            logger.info(f"No rapidfuzz matches found for '{creator_name}'")
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in rapidfuzz CSV search: {e}")
+        # Fallback to standard search
+        return await search_multiple_models_in_csv_parallel(creator_name, csv_path, max_results)

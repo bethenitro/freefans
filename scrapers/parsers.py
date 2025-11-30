@@ -7,8 +7,68 @@ from bs4 import BeautifulSoup
 from typing import List, Dict, Optional
 from urllib.parse import urlparse
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import functools
+import hashlib
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
+# Create a thread pool executor for CPU-bound parsing tasks
+# Increased workers from 4 to 8 for better performance
+_executor = ThreadPoolExecutor(max_workers=8)
+
+# Cache for parsed HTML content to avoid re-parsing
+_html_parse_cache = {}
+_cache_max_size = 100
+_cache_ttl = timedelta(minutes=10)
+
+
+def _get_html_hash(html: str) -> str:
+    """Generate a hash for HTML content for caching."""
+    return hashlib.md5(html.encode('utf-8')).hexdigest()[:16]
+
+
+def _clean_html_cache():
+    """Remove expired entries from HTML cache."""
+    global _html_parse_cache
+    now = datetime.now()
+    expired_keys = [
+        key for key, value in _html_parse_cache.items()
+        if now - value['timestamp'] > _cache_ttl
+    ]
+    for key in expired_keys:
+        del _html_parse_cache[key]
+    
+    # If cache is too large, remove oldest entries
+    if len(_html_parse_cache) > _cache_max_size:
+        sorted_items = sorted(_html_parse_cache.items(), key=lambda x: x[1]['timestamp'])
+        for key, _ in sorted_items[:len(_html_parse_cache) - _cache_max_size]:
+            del _html_parse_cache[key]
+
+
+def _get_cached_parse(html: str, cache_key: str):
+    """Get cached parse result if available."""
+    _clean_html_cache()
+    html_hash = _get_html_hash(html)
+    full_key = f"{cache_key}_{html_hash}"
+    
+    if full_key in _html_parse_cache:
+        logger.debug(f"Cache hit for {cache_key}")
+        return _html_parse_cache[full_key]['data']
+    return None
+
+
+def _cache_parse_result(html: str, cache_key: str, data):
+    """Cache parse result."""
+    html_hash = _get_html_hash(html)
+    full_key = f"{cache_key}_{html_hash}"
+    _html_parse_cache[full_key] = {
+        'data': data,
+        'timestamp': datetime.now()
+    }
+    logger.debug(f"Cached {cache_key} (cache size: {len(_html_parse_cache)})")
 
 
 def load_video_domains(file_path: str = 'video_domains.txt') -> List[str]:
@@ -67,16 +127,25 @@ ALL_DOMAINS = VIDEO_DOMAINS + CONTENT_DOMAINS
 
 def extract_max_pages(html: str) -> int:
     """Extract the maximum number of pages from pagination"""
+    # Check cache first
+    cached = _get_cached_parse(html, 'max_pages')
+    if cached is not None:
+        return cached
+    
     try:
         soup = BeautifulSoup(html, 'html.parser')
         
         page_nav = soup.find('nav', class_='pageNavWrapper')
         if not page_nav:
-            return 1
+            result = 1
+            _cache_parse_result(html, 'max_pages', result)
+            return result
         
         page_links = page_nav.find_all('li', class_='pageNav-page')
         if not page_links:
-            return 1
+            result = 1
+            _cache_parse_result(html, 'max_pages', result)
+            return result
         
         max_page = 1
         for link_li in page_links:
@@ -87,6 +156,7 @@ def extract_max_pages(html: str) -> int:
                     page_num = int(text)
                     max_page = max(max_page, page_num)
         
+        _cache_parse_result(html, 'max_pages', max_page)
         return max_page
         
     except Exception as e:
@@ -96,6 +166,11 @@ def extract_max_pages(html: str) -> int:
 
 def extract_social_links(html: str) -> Dict[str, str]:
     """Extract OnlyFans and Instagram links from the first post"""
+    # Check cache first
+    cached = _get_cached_parse(html, 'social_links')
+    if cached is not None:
+        return cached
+    
     try:
         soup = BeautifulSoup(html, 'html.parser')
         social_links = {
@@ -105,10 +180,12 @@ def extract_social_links(html: str) -> Dict[str, str]:
         
         first_message = soup.find('article', class_='message')
         if not first_message:
+            _cache_parse_result(html, 'social_links', social_links)
             return social_links
         
         message_body = first_message.find('div', class_='bbWrapper')
         if not message_body:
+            _cache_parse_result(html, 'social_links', social_links)
             return social_links
         
         links = message_body.find_all('a', href=True)
@@ -125,6 +202,7 @@ def extract_social_links(html: str) -> Dict[str, str]:
             if social_links['onlyfans'] and social_links['instagram']:
                 break
         
+        _cache_parse_result(html, 'social_links', social_links)
         return social_links
         
     except Exception as e:
@@ -134,6 +212,11 @@ def extract_social_links(html: str) -> Dict[str, str]:
 
 def extract_preview_images(html: str) -> List[Dict[str, str]]:
     """Extract all preview images from posts (jpg, png, gif, webp)"""
+    # Check cache first
+    cached = _get_cached_parse(html, 'preview_images')
+    if cached is not None:
+        return cached
+    
     try:
         soup = BeautifulSoup(html, 'html.parser')
         preview_images = []
@@ -173,6 +256,7 @@ def extract_preview_images(html: str) -> List[Dict[str, str]]:
                         'domain': extract_domain(img_url)
                     })
         
+        _cache_parse_result(html, 'preview_images', preview_images)
         return preview_images
         
     except Exception as e:
@@ -230,8 +314,9 @@ def extract_content_links(html: str) -> List[Dict[str, str]]:
         return []
 
 
+@functools.lru_cache(maxsize=256)
 def determine_content_type(url: str, text: str) -> str:
-    """Determine the type of content from URL and link text"""
+    """Determine the type of content from URL and link text - CACHED"""
     url_lower = url.lower()
     text_lower = text.lower()
     
@@ -475,3 +560,37 @@ def group_content_by_type(content_items: List[Dict]) -> Dict[str, List[Dict]]:
             grouped[content_type] = []
         grouped[content_type].append(item)
     return grouped
+
+
+# Async wrappers for concurrent parsing operations
+async def extract_preview_images_async(html: str) -> List[Dict[str, str]]:
+    """Async wrapper for extract_preview_images to run in thread pool."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, extract_preview_images, html)
+
+
+async def extract_content_links_async(html: str) -> List[Dict[str, str]]:
+    """Async wrapper for extract_content_links to run in thread pool."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, extract_content_links, html)
+
+
+async def extract_video_links_async(html: str) -> List[Dict[str, str]]:
+    """Async wrapper for extract_video_links to run in thread pool."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, extract_video_links, html)
+
+
+async def parse_page_content_concurrent(html: str) -> tuple:
+    """Parse all content from a page concurrently using thread pool.
+    
+    Returns:
+        tuple: (content_links, preview_images, video_links)
+    """
+    # Run all parsing operations concurrently
+    results = await asyncio.gather(
+        extract_content_links_async(html),
+        extract_preview_images_async(html),
+        extract_video_links_async(html)
+    )
+    return results[0], results[1], results[2]

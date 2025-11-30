@@ -221,6 +221,7 @@ class OnlyFansForumScraper:
     async def scrape_all_pages(self, max_pages: int = 165) -> List[Dict[str, str]]:
         """
         Scrape model information from all pages with incremental saving and checkpointing.
+        Optimized with concurrent page fetching for better performance.
         
         Args:
             max_pages: Maximum number of pages to scrape
@@ -247,60 +248,84 @@ class OnlyFansForumScraper:
             print(f"📋 Base URL: {self.forum_url}")
             print("-" * 50)
             
-            for page_num in range(start_page, max_pages + 1):
+            # Process pages in batches for concurrent fetching
+            batch_size = 3  # Fetch 3 pages at a time to avoid overwhelming the server
+            
+            for batch_start in range(start_page, max_pages + 1, batch_size):
+                batch_end = min(batch_start + batch_size, max_pages + 1)
+                
                 try:
-                    # Construct URL for each page
-                    if page_num == 1:
-                        url = self.forum_url
-                    else:
-                        url = f"{self.forum_url}page-{page_num}"
-                    
-                    # Random delay before each request (2-8 seconds)
-                    delay = random.uniform(2.0, 8.0)
-                    if page_num > start_page:  # Don't delay on the first page
-                        print(f"⏱️  Waiting {delay:.1f} seconds before next request...")
+                    # Random delay before each batch (2-5 seconds)
+                    if batch_start > start_page:
+                        delay = random.uniform(2.0, 5.0)
+                        print(f"⏱️  Waiting {delay:.1f} seconds before next batch...")
                         await asyncio.sleep(delay)
                     
-                    # Fetch the page
-                    html = await self.fetch_page(client, url)
+                    # Create tasks for concurrent page fetching
+                    async def fetch_and_parse_page(page_num):
+                        """Fetch and parse a single page."""
+                        # Construct URL
+                        if page_num == 1:
+                            url = self.forum_url
+                        else:
+                            url = f"{self.forum_url}page-{page_num}"
+                        
+                        # Fetch the page
+                        html = await self.fetch_page(client, url)
+                        if not html:
+                            return page_num, []
+                        
+                        # Parse model information
+                        page_models = self.parse_model_info(html)
+                        return page_num, page_models
                     
-                    # Parse model information
-                    page_models = self.parse_model_info(html)
+                    # Fetch batch concurrently
+                    tasks = [fetch_and_parse_page(page_num) for page_num in range(batch_start, batch_end)]
+                    batch_results = await asyncio.gather(*tasks, return_exceptions=True)
                     
-                    # Filter out models we already have
-                    new_models = []
-                    for model in page_models:
-                        if model['profile_link'] not in scraped_links:
-                            new_models.append(model)
-                            scraped_links.add(model['profile_link'])
-                    
-                    print(f"📊 Page {page_num}: Found {len(page_models)} models ({len(new_models)} new)")
-                    
-                    # Add new models to the collection
-                    all_models.extend(new_models)
-                    
-                    # Save new models to CSV immediately (append mode)
-                    if new_models:
-                        self.append_new_models_to_csv(new_models)
-                    
-                    # Save checkpoint after each page
-                    self.save_checkpoint(page_num, len(all_models), scraped_links)
-                    
-                    print(f"💾 Progress saved. Total models so far: {len(all_models)}")
+                    # Process results
+                    for result in batch_results:
+                        if isinstance(result, Exception):
+                            print(f"❌ Error in batch processing: {result}")
+                            continue
+                        
+                        page_num, page_models = result
+                        
+                        # Filter out models we already have
+                        new_models = []
+                        for model in page_models:
+                            if model['profile_link'] not in scraped_links:
+                                new_models.append(model)
+                                scraped_links.add(model['profile_link'])
+                        
+                        print(f"📊 Page {page_num}: Found {len(page_models)} models ({len(new_models)} new)")
+                        
+                        # Add new models to the collection
+                        all_models.extend(new_models)
+                        
+                        # Save new models to CSV immediately (append mode)
+                        if new_models:
+                            self.append_new_models_to_csv(new_models)
+                        
+                        # Save checkpoint after each page
+                        self.save_checkpoint(page_num, len(all_models), scraped_links)
+                        
+                        print(f"💾 Progress saved. Total models so far: {len(all_models)}")
                     
                 except KeyboardInterrupt:
-                    print(f"\n⚠️ Interrupted by user at page {page_num}")
-                    print(f"📊 Progress saved up to page {page_num - 1}")
+                    print(f"\n⚠️ Interrupted by user at page {batch_start}")
+                    print(f"📊 Progress saved up to page {batch_start - 1}")
                     break
                 except Exception as e:
-                    print(f"❌ Error processing page {page_num}: {e}")
-                    print(f"⏭️  Continuing to next page...")
+                    print(f"❌ Error processing batch starting at page {batch_start}: {e}")
+                    print(f"⏭️  Continuing to next batch...")
                     continue
             
             print("-" * 50)
             print(f"🎉 Fetching completed! Total models found: {len(all_models)}")
             
             # Clean up checkpoint file when fully completed
+            page_num = batch_end - 1
             if page_num >= max_pages and os.path.exists(self.checkpoint_file):
                 os.remove(self.checkpoint_file)
                 print("🧹 Removed checkpoint file (Fetching completed)")

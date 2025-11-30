@@ -10,3 +10,4 @@ content_domains.txt
 .env
 env/
 coomer.json
+logs.txt

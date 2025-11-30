@@ -5,11 +5,13 @@ Content Scraper - Simplified main interface using modular components
 import asyncio
 import logging
 from typing import Optional, Dict, List, Tuple
+from datetime import datetime, timedelta
 from scrapers.fetcher import HTTPFetcher
-from scrapers.csv_handler import search_model_in_csv, search_multiple_models_in_csv
+from scrapers.csv_handler import search_model_in_csv, search_multiple_models_in_csv, search_multiple_models_in_csv_parallel
 from scrapers.parsers import (
     extract_max_pages, extract_social_links, extract_preview_images,
-    extract_content_links, extract_video_links, group_content_by_type
+    extract_content_links, extract_video_links, group_content_by_type,
+    parse_page_content_concurrent
 )
 from scrapers.simpcity_search import (
     build_search_url, parse_search_results, add_creator_to_csv, 
@@ -17,6 +19,57 @@ from scrapers.simpcity_search import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Content cache to store complete scraping results
+_content_cache = {}
+_content_cache_ttl = timedelta(minutes=15)  # Cache content for 15 minutes
+_content_cache_max_size = 50
+
+
+def _get_content_cache_key(url: str, start_page: int, max_pages: int) -> str:
+    """Generate cache key for content scraping."""
+    return f"{url}|{start_page}|{max_pages}"
+
+
+def _clean_content_cache():
+    """Remove expired entries from content cache."""
+    global _content_cache
+    now = datetime.now()
+    expired_keys = [
+        key for key, value in _content_cache.items()
+        if now - value['timestamp'] > _content_cache_ttl
+    ]
+    for key in expired_keys:
+        del _content_cache[key]
+        logger.debug(f"Removed expired cache entry: {key}")
+    
+    # If cache is too large, remove oldest entries
+    if len(_content_cache) > _content_cache_max_size:
+        sorted_items = sorted(_content_cache.items(), key=lambda x: x[1]['timestamp'])
+        for key, _ in sorted_items[:len(_content_cache) - _content_cache_max_size]:
+            del _content_cache[key]
+            logger.debug(f"Removed old cache entry: {key}")
+
+
+def _get_cached_content(url: str, start_page: int, max_pages: int) -> Optional[Dict]:
+    """Get cached content if available."""
+    _clean_content_cache()
+    cache_key = _get_content_cache_key(url, start_page, max_pages)
+    
+    if cache_key in _content_cache:
+        logger.info(f"✓ Content cache hit for {url} (pages {start_page}-{start_page+max_pages-1})")
+        return _content_cache[cache_key]['data']
+    return None
+
+
+def _cache_content(url: str, start_page: int, max_pages: int, data: Dict):
+    """Cache content scraping results."""
+    cache_key = _get_content_cache_key(url, start_page, max_pages)
+    _content_cache[cache_key] = {
+        'data': data,
+        'timestamp': datetime.now()
+    }
+    logger.info(f"✓ Cached content for {url} (cache size: {len(_content_cache)})")
 
 
 class SimpleCityScraper:
@@ -64,7 +117,8 @@ class SimpleCityScraper:
     async def search_simpcity(self, creator_name: str) -> Optional[List[Dict]]:
         """
         Search for creator on SimpCity when not found in CSV.
-        Returns list of search results filtered for OnlyFans forum with >1 reply.
+        Returns list of search results filtered for OnlyFans forum with >1 reply,
+        ranked by fuzzy matching against the query.
         """
         try:
             search_url = build_search_url(creator_name)
@@ -82,8 +136,16 @@ class SimpleCityScraper:
                 logger.info(f"No valid results found for {creator_name}")
                 return None
             
-            logger.info(f"Found {len(results)} results for {creator_name}")
-            return results
+            logger.info(f"Found {len(results)} raw results for {creator_name}")
+            
+            # Apply fuzzy search ranking to get best matches
+            from scrapers.simpcity_search import rank_search_results_by_query
+            ranked_results = rank_search_results_by_query(creator_name, results, limit=15)
+            
+            if ranked_results:
+                logger.info(f"Returning {len(ranked_results)} ranked results")
+            
+            return ranked_results if ranked_results else results
             
         except Exception as e:
             logger.error(f"Error searching SimpCity: {e}")
@@ -96,7 +158,7 @@ class SimpleCityScraper:
     async def search_creator_options(self, creator_name: str) -> Optional[Dict]:
         """
         Search for creator and return multiple options.
-        First searches CSV, then falls back to SimpCity search if not found.
+        First searches CSV using rapidfuzz, then falls back to SimpCity search if not found.
         
         Returns:
             - None if no matches found
@@ -106,15 +168,16 @@ class SimpleCityScraper:
         try:
             logger.info(f"Searching for creator options: {creator_name}")
             
-            # First, try CSV search
-            multiple_matches = self.search_multiple_models_in_csv(creator_name, max_results=10)
+            # First, try CSV search with rapidfuzz for better performance and accuracy
+            from scrapers.csv_handler import search_csv_with_rapidfuzz
+            multiple_matches = await search_csv_with_rapidfuzz(creator_name, max_results=10)
             
             if multiple_matches:
                 # Filter matches with at least 50% similarity
                 filtered_matches = [m for m in multiple_matches if m[2] >= 0.5]
                 
                 if filtered_matches:
-                    logger.info(f"Found {len(filtered_matches)} CSV matches, showing options")
+                    logger.info(f"Found {len(filtered_matches)} CSV matches with rapidfuzz, showing options")
                     
                     # Always show options for user to select
                     return {
@@ -132,7 +195,7 @@ class SimpleCityScraper:
                         'simpcity_search': False
                     }
             
-            # If no CSV matches, search SimpCity
+            # If no CSV matches, search SimpCity with fuzzy ranking
             logger.info(f"No CSV matches found, searching SimpCity for: {creator_name}")
             simpcity_results = await self.search_simpcity(creator_name)
             
@@ -197,6 +260,11 @@ class SimpleCityScraper:
                 # Ask for confirmation if similarity is less than 70%
                 needs_confirmation = similarity < 0.7
             
+            # Check cache first
+            cached_result = _get_cached_content(url, start_page, max_pages)
+            if cached_result is not None:
+                return cached_result
+            
             # Fetch the first page
             logger.info(f"Fetching page: {url}")
             html = await self.fetch_page(url)
@@ -209,12 +277,9 @@ class SimpleCityScraper:
                 social_links = self.extract_social_links(html)
                 logger.info(f"Found social links: OnlyFans={social_links['onlyfans']}, Instagram={social_links['instagram']}")
             
-            # Extract preview images
-            preview_images = self.extract_preview_images(html)
+            # Extract content from first page using concurrent parsing
+            all_content, preview_images, video_links = await parse_page_content_concurrent(html)
             logger.info(f"Found {len(preview_images)} preview images on first page")
-            
-            # Extract video links
-            video_links = self.extract_video_links(html)
             logger.info(f"Found {len(video_links)} video links on first page")
             
             # Extract max pages
@@ -225,34 +290,53 @@ class SimpleCityScraper:
             end_page = min(start_page + max_pages - 1, total_pages)
             pages_to_scrape = end_page - start_page + 1
             
-            # Extract content from first page
-            all_content = self.extract_content_links(html)
+            # Create lists for aggregating content
             all_images = preview_images.copy()
             all_videos = video_links.copy()
             
-            # Fetch additional pages if available
+            # Fetch additional pages if available - OPTIMIZED WITH CONCURRENT FETCHING
             if pages_to_scrape > 1 or start_page > 1:
                 # Determine the range of pages to fetch
                 page_start = start_page + 1 if start_page == 1 else start_page
                 page_end = end_page + 1
                 
-                for page_num in range(page_start, page_end):
+                # Create tasks for fetching pages concurrently
+                async def fetch_and_parse_page(page_num):
+                    """Fetch and parse a single page."""
                     page_url = f"{url}page-{page_num}"
                     logger.info(f"Fetching page {page_num}/{total_pages}: {page_url}")
                     
                     page_html = await self.fetch_page(page_url)
                     if page_html:
-                        page_content = self.extract_content_links(page_html)
-                        all_content.extend(page_content)
-                        
-                        page_images = self.extract_preview_images(page_html)
-                        all_images.extend(page_images)
-                        
-                        page_videos = self.extract_video_links(page_html)
-                        all_videos.extend(page_videos)
-                    
-                    # Small delay to avoid rate limiting
-                    await asyncio.sleep(1)
+                        # Use concurrent parsing for better performance
+                        page_content, page_images, page_videos = await parse_page_content_concurrent(page_html)
+                        return page_content, page_images, page_videos
+                    return [], [], []
+                
+                # Fetch all pages concurrently with gather
+                page_tasks = [fetch_and_parse_page(page_num) for page_num in range(page_start, page_end)]
+                
+                # Add small delays between task creation to avoid overwhelming the server
+                # But still much faster than sequential fetching
+                if len(page_tasks) > 10:
+                    # For large batches, process in groups of 10 (increased from 5)
+                    results = []
+                    for i in range(0, len(page_tasks), 10):
+                        batch = page_tasks[i:i+10]
+                        batch_results = await asyncio.gather(*batch)
+                        results.extend(batch_results)
+                        # Small delay between batches (reduced from 0.5s to 0.2s)
+                        if i + 10 < len(page_tasks):
+                            await asyncio.sleep(0.2)
+                else:
+                    # For small batches, fetch all at once
+                    results = await asyncio.gather(*page_tasks)
+                
+                # Aggregate results from all pages
+                for page_content, page_images, page_videos in results:
+                    all_content.extend(page_content)
+                    all_images.extend(page_images)
+                    all_videos.extend(page_videos)
             
             # Remove duplicates based on URL
             unique_content = []
@@ -282,7 +366,7 @@ class SimpleCityScraper:
             logger.info(f"Found {len(unique_images)} unique preview images")
             logger.info(f"Found {len(unique_videos)} unique video links")
             
-            return {
+            result = {
                 'creator_name': matched_name,
                 'similarity': similarity,
                 'needs_confirmation': needs_confirmation,
@@ -300,6 +384,11 @@ class SimpleCityScraper:
                 'total_videos': len(unique_videos),
                 'social_links': social_links
             }
+            
+            # Cache the result
+            _cache_content(url, start_page, max_pages, result)
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error in scrape_creator_content: {e}")

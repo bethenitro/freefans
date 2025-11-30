@@ -4,6 +4,9 @@ Callback Handlers - Handles all callback queries from inline keyboards
 
 import logging
 import re
+import asyncio
+from datetime import datetime, timedelta
+from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.error import TimedOut, NetworkError, BadRequest
@@ -17,6 +20,91 @@ from bot.ui_components import (
 )
 
 logger = logging.getLogger(__name__)
+
+# OnlyFans feed cache
+_onlyfans_feed_cache = {}
+_onlyfans_feed_cache_ttl = timedelta(hours=1)  # Cache OF feeds for 1 hour
+_onlyfans_feed_cache_max_size = 50
+
+# OnlyFans post details cache
+_onlyfans_post_cache = {}
+_onlyfans_post_cache_ttl = timedelta(hours=2)  # Cache post details for 2 hours
+_onlyfans_post_cache_max_size = 200
+
+# Picture/Video page message cache
+_media_page_cache = {}
+_media_page_cache_ttl = timedelta(minutes=30)  # Cache formatted messages for 30 minutes
+_media_page_cache_max_size = 100
+
+
+def _clean_onlyfans_cache():
+    """Remove expired entries from OnlyFans caches."""
+    global _onlyfans_feed_cache, _onlyfans_post_cache
+    now = datetime.now()
+    
+    # Clean feed cache
+    expired_keys = [
+        key for key, value in _onlyfans_feed_cache.items()
+        if now - value['timestamp'] > _onlyfans_feed_cache_ttl
+    ]
+    for key in expired_keys:
+        del _onlyfans_feed_cache[key]
+    
+    if len(_onlyfans_feed_cache) > _onlyfans_feed_cache_max_size:
+        sorted_items = sorted(_onlyfans_feed_cache.items(), key=lambda x: x[1]['timestamp'])
+        for key, _ in sorted_items[:len(_onlyfans_feed_cache) - _onlyfans_feed_cache_max_size]:
+            del _onlyfans_feed_cache[key]
+    
+    # Clean post cache
+    expired_keys = [
+        key for key, value in _onlyfans_post_cache.items()
+        if now - value['timestamp'] > _onlyfans_post_cache_ttl
+    ]
+    for key in expired_keys:
+        del _onlyfans_post_cache[key]
+    
+    if len(_onlyfans_post_cache) > _onlyfans_post_cache_max_size:
+        sorted_items = sorted(_onlyfans_post_cache.items(), key=lambda x: x[1]['timestamp'])
+        for key, _ in sorted_items[:len(_onlyfans_post_cache) - _onlyfans_post_cache_max_size]:
+            del _onlyfans_post_cache[key]
+
+
+def _clean_media_page_cache():
+    """Remove expired entries from media page cache."""
+    global _media_page_cache
+    now = datetime.now()
+    expired_keys = [
+        key for key, value in _media_page_cache.items()
+        if now - value['timestamp'] > _media_page_cache_ttl
+    ]
+    for key in expired_keys:
+        del _media_page_cache[key]
+    
+    if len(_media_page_cache) > _media_page_cache_max_size:
+        sorted_items = sorted(_media_page_cache.items(), key=lambda x: x[1]['timestamp'])
+        for key, _ in sorted_items[:len(_media_page_cache) - _media_page_cache_max_size]:
+            del _media_page_cache[key]
+
+
+def _get_cached_media_page(media_type: str, creator_url: str, page: int) -> Optional[list]:
+    """Get cached formatted media page messages."""
+    _clean_media_page_cache()
+    cache_key = f"{media_type}:{creator_url}:{page}"
+    
+    if cache_key in _media_page_cache:
+        logger.debug(f"✓ Media page cache hit for {media_type} page {page}")
+        return _media_page_cache[cache_key]['data']
+    return None
+
+
+def _cache_media_page(media_type: str, creator_url: str, page: int, messages: list):
+    """Cache formatted media page messages."""
+    cache_key = f"{media_type}:{creator_url}:{page}"
+    _media_page_cache[cache_key] = {
+        'data': messages,
+        'timestamp': datetime.now()
+    }
+    logger.debug(f"✓ Cached {media_type} page {page} (cache size: {len(_media_page_cache)})")
 
 
 def escape_markdown(text: str) -> str:
@@ -287,9 +375,9 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         if total_videos > 0:
             keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
         
-        # Add OF Feed button if OnlyFans link is available
+        # Add Onlyfans Feed button if OnlyFans link is available
         if has_onlyfans:
-            keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
+            keyboard.append([InlineKeyboardButton("📱 Onlyfans Feed", callback_data="view_of_feed")])
         
         # Always show Load More if more content available
         if has_more_pages:
@@ -421,9 +509,9 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
         if total_videos > 0:
             keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
         
-        # Add OF Feed button if OnlyFans link is available
+        # Add Onlyfans Feed button if OnlyFans link is available
         if has_onlyfans:
-            keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
+            keyboard.append([InlineKeyboardButton("📱 Onlyfans Feed", callback_data="view_of_feed")])
         
         if has_more_pages:
             keyboard.append([InlineKeyboardButton("⬇️ Load More Content", callback_data="load_more_pages")])
@@ -496,9 +584,9 @@ async def display_content_directory_from_callback(query, session, content_direct
     if total_videos > 0:
         keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
     
-    # Add OF Feed button if OnlyFans link is available
+    # Add Onlyfans Feed button if OnlyFans link is available
     if has_onlyfans:
-        keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
+        keyboard.append([InlineKeyboardButton("📱 Onlyfans Feed", callback_data="view_of_feed")])
     
     # Add "Load More" button if there are more pages available
     if has_more_pages:
@@ -574,9 +662,9 @@ async def handle_load_more_pages(query, session, bot_instance) -> None:
             if total_videos > 0:
                 keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
             
-            # Add OF Feed button if OnlyFans link is available
+            # Add Onlyfans Feed button if OnlyFans link is available
             if has_onlyfans:
-                keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
+                keyboard.append([InlineKeyboardButton("📱 Onlyfans Feed", callback_data="view_of_feed")])
             
             # Add "Load More" button if there is still more content
             if has_more_pages:
@@ -779,9 +867,9 @@ async def handle_back_to_list(query, session) -> None:
     if total_videos > 0:
         keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
     
-    # Add OF Feed button if OnlyFans link is available
+    # Add Onlyfans Feed button if OnlyFans link is available
     if has_onlyfans:
-        keyboard.append([InlineKeyboardButton("📱 OF Feed", callback_data="view_of_feed")])
+        keyboard.append([InlineKeyboardButton("📱 Onlyfans Feed", callback_data="view_of_feed")])
     
     # Add "Load More" button if there are more pages available
     if has_more_pages:
@@ -816,31 +904,86 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
     end_idx = start_idx + items_per_page
     page_items = preview_images[start_idx:end_idx]
     
-    await query.edit_message_text(f"Loading pictures {start_idx + 1}-{min(end_idx, len(preview_images))}...")
+    # Check cache for this specific page
+    creator_url = session.current_directory.get('url', '')
+    cached_messages = _get_cached_media_page('pictures', creator_url, page)
     
-    # Send each image with link preview
-    for idx, item in enumerate(page_items, start=start_idx):
-        image_url = item.get('url', '')
-        domain = item.get('domain', 'Unknown')
+    if cached_messages:
+        logger.info(f"✓ Using cached picture messages for page {page}")
+        # Send cached messages
+        message_tasks = [
+            send_message_with_retry(
+                query.message.reply_text,
+                msg['text'],
+                parse_mode=msg.get('parse_mode', 'Markdown'),
+                disable_web_page_preview=msg.get('disable_web_page_preview', False)
+            )
+            for msg in cached_messages
+        ]
         
-        message_text = f"""
+        # Send all messages concurrently in batches
+        batch_size = 5
+        for i in range(0, len(message_tasks), batch_size):
+            batch = message_tasks[i:i+batch_size]
+            try:
+                await asyncio.gather(*batch, return_exceptions=True)
+            except Exception as e:
+                logger.error(f"Failed to send cached image batch: {e}")
+            
+            if i + batch_size < len(message_tasks):
+                await asyncio.sleep(0.1)
+    else:
+        await query.edit_message_text(f"Loading pictures {start_idx + 1}-{min(end_idx, len(preview_images))}...")
+        
+        # Build messages to send and cache
+        messages_to_cache = []
+        message_tasks = []
+        
+        for idx, item in enumerate(page_items, start=start_idx):
+            image_url = item.get('url', '')
+            domain = item.get('domain', 'Unknown')
+            
+            message_text = f"""
 🖼️ **Picture #{idx + 1}**
 
 🔗 Click link below to view full image:
 {image_url}
 
 💡 Tip: Telegram shows a preview thumbnail. Click to open the full image.
-        """
-        
-        try:
-            await send_message_with_retry(
-                query.message.reply_text,
-                message_text,
-                parse_mode='Markdown',
-                disable_web_page_preview=False
+            """
+            
+            # Store for caching
+            messages_to_cache.append({
+                'text': message_text,
+                'parse_mode': 'Markdown',
+                'disable_web_page_preview': False
+            })
+            
+            # Create task for sending message
+            message_tasks.append(
+                send_message_with_retry(
+                    query.message.reply_text,
+                    message_text,
+                    parse_mode='Markdown',
+                    disable_web_page_preview=False
+                )
             )
-        except Exception as e:
-            logger.error(f"Failed to send image link {idx + 1}: {e}")
+        
+        # Send all messages concurrently in batches
+        batch_size = 5
+        for i in range(0, len(message_tasks), batch_size):
+            batch = message_tasks[i:i+batch_size]
+            try:
+                await asyncio.gather(*batch, return_exceptions=True)
+            except Exception as e:
+                logger.error(f"Failed to send image batch: {e}")
+            
+            # Small delay to respect rate limits
+            if i + batch_size < len(message_tasks):
+                await asyncio.sleep(0.1)
+        
+        # Cache the messages for this page
+        _cache_media_page('pictures', creator_url, page, messages_to_cache)
     
     # Send navigation message
     nav_text = f"""
@@ -1126,28 +1269,81 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
     end_idx = start_idx + items_per_page
     page_items = video_links[start_idx:end_idx]
     
-    await query.edit_message_text(f"Loading videos {start_idx + 1}-{min(end_idx, len(video_links))}...")
+    # Check cache for this specific page
+    creator_url = session.current_directory.get('url', '')
+    cached_messages = _get_cached_media_page('videos', creator_url, page)
     
-    # Send each video link with title
-    for idx, item in enumerate(page_items, start=start_idx):
-        video_url = item.get('url', '')
-        title = item.get('title', f'Video #{idx + 1}')
-        domain = item.get('domain', 'Unknown')
+    if cached_messages:
+        logger.info(f"✓ Using cached video messages for page {page}")
+        # Send cached messages
+        message_tasks = [
+            send_message_with_retry(
+                query.message.reply_text,
+                msg['text'],
+                disable_web_page_preview=msg.get('disable_web_page_preview', False)
+            )
+            for msg in cached_messages
+        ]
         
-        message_text = f"""🎬 {title}
+        # Send all messages concurrently in batches
+        batch_size = 5
+        for i in range(0, len(message_tasks), batch_size):
+            batch = message_tasks[i:i+batch_size]
+            try:
+                await asyncio.gather(*batch, return_exceptions=True)
+            except Exception as e:
+                logger.error(f"Failed to send cached video batch: {e}")
+            
+            if i + batch_size < len(message_tasks):
+                await asyncio.sleep(0.1)
+    else:
+        await query.edit_message_text(f"Loading videos {start_idx + 1}-{min(end_idx, len(video_links))}...")
+        
+        # Build messages to send and cache
+        messages_to_cache = []
+        message_tasks = []
+        
+        for idx, item in enumerate(page_items, start=start_idx):
+            video_url = item.get('url', '')
+            title = item.get('title', f'Video #{idx + 1}')
+            domain = item.get('domain', 'Unknown')
+            
+            message_text = f"""🎬 {title}
 
 🔗 Link: {video_url}
 
 💡 Click the link above to view or download the video."""
-        
-        try:
-            await send_message_with_retry(
-                query.message.reply_text,
-                message_text,
-                disable_web_page_preview=False
+            
+            # Store for caching
+            messages_to_cache.append({
+                'text': message_text,
+                'disable_web_page_preview': False
+            })
+            
+            # Create task for sending message
+            message_tasks.append(
+                send_message_with_retry(
+                    query.message.reply_text,
+                    message_text,
+                    disable_web_page_preview=False
+                )
             )
-        except Exception as e:
-            logger.error(f"Failed to send video link {idx + 1}: {e}")
+        
+        # Send all messages concurrently in batches
+        batch_size = 5
+        for i in range(0, len(message_tasks), batch_size):
+            batch = message_tasks[i:i+batch_size]
+            try:
+                await asyncio.gather(*batch, return_exceptions=True)
+            except Exception as e:
+                logger.error(f"Failed to send video batch: {e}")
+            
+            # Small delay to respect rate limits
+            if i + batch_size < len(message_tasks):
+                await asyncio.sleep(0.1)
+        
+        # Cache the messages for this page
+        _cache_media_page('videos', creator_url, page, messages_to_cache)
     
     # Send navigation message
     nav_text = f"""
@@ -1366,86 +1562,102 @@ async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> No
     
     username = username_match.group(1)
     
-    # Show loading message
-    await query.edit_message_text(f"⏳ Loading archived OF Feed for @{username}...")
-    
-    try:
-        # Fetch posts from Coomer API
-        import httpx
-        import json
-        import asyncio
+    # Check cache first
+    _clean_onlyfans_cache()
+    if username in _onlyfans_feed_cache:
+        logger.info(f"✓ OnlyFans feed cache hit for {username}")
+        posts = _onlyfans_feed_cache[username]['data']
         
-        # Small delay to avoid rate limiting
-        await asyncio.sleep(1)
+        # Update message to show it's from cache
+        await query.edit_message_text(f"✓ Loaded archived Onlyfans Feed for @{username} (cached)")
+    else:
+        # Show loading message
+        await query.edit_message_text(f"⏳ Loading archived Onlyfans Feed for @{username}...")
         
-        api_url = f"https://coomer.st/api/v1/onlyfans/user/{username}/posts"
-        
-        # Add headers and cookies to mimic a browser request and bypass DDoS-Guard
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0',
-            'Accept': 'text/css',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
-            'Referer': f'https://coomer.st/onlyfans/user/{username}',
-            'Sec-GPC': '1',
-            'Connection': 'keep-alive',
-            'Cookie': '__ddg8_=oYZ5VQJk5kVaS0OW; __ddg10_=1764498146; __ddg9_=169.150.196.144; __ddg1_=MG8yyPWZPYJxBTqS1VhW; thumbSize=180',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'Priority': 'u=4',
-            'TE': 'trailers',
-        }
-        
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            # Try up to 2 times with different delays
-            for attempt in range(2):
-                try:
-                    logger.info(f"Fetching OF Feed for {username}, attempt {attempt + 1}")
-                    response = await client.get(api_url, headers=headers)
-                    logger.info(f"Response status: {response.status_code}")
-                    break
-                except (httpx.ConnectError, httpx.ReadTimeout) as e:
-                    if attempt < 1:
-                        logger.warning(f"Attempt {attempt + 1} failed: {e}, retrying...")
-                        await asyncio.sleep(2)
-                        continue
-                    else:
-                        raise
+        try:
+            # Fetch posts from Coomer API
+            import httpx
+            import json
+            import asyncio
             
-            if response.status_code == 404:
-                await query.edit_message_text(
-                    f"❌ No archived feed found for @{username}.\n\n"
-                    "This creator may not be available in the archive database."
-                )
-                return
+            # Small delay to avoid rate limiting
+            await asyncio.sleep(1)
             
-            if response.status_code == 403:
-                # Try alternative approach: provide direct link and explain
-                await query.edit_message_text(
-                    f"⚠️ **Access Currently Unavailable**\n\n"
-                    f"The archive database is currently blocking automated requests for @{username}.\n\n"
-                    f"**View Feed Manually:**\n"
-                    f"You can browse the archived OnlyFans feed directly by opening this link in your browser:\n\n"
-                    f"🔗 `https://coomer.st/onlyfans/user/{username}`\n\n"
-                    f"💡 **Note:** The link provides access to all archived posts, photos, and videos from this creator's OnlyFans.",
-                    parse_mode='Markdown',
-                    disable_web_page_preview=False
-                )
-                return
+            api_url = f"https://coomer.st/api/v1/onlyfans/user/{username}/posts"
             
-            if response.status_code != 200:
-                await query.edit_message_text(
-                    f"❌ Failed to fetch OF Feed (Status: {response.status_code}).\n\n"
-                    "Please try again later."
-                )
-                return
+            # Add headers and cookies to mimic a browser request and bypass DDoS-Guard
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0',
+                'Accept': 'text/css',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate, br, zstd',
+                'Referer': f'https://coomer.st/onlyfans/user/{username}',
+                'Sec-GPC': '1',
+                'Connection': 'keep-alive',
+                'Cookie': '__ddg8_=oYZ5VQJk5kVaS0OW; __ddg10_=1764498146; __ddg9_=169.150.196.144; __ddg1_=MG8yyPWZPYJxBTqS1VhW; thumbSize=180',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'Priority': 'u=4',
+                'TE': 'trailers',
+            }
             
-            posts = response.json()
-            
-            # Save to coomer.json for reference
-            with open('coomer.json', 'w', encoding='utf-8') as f:
-                json.dump(posts, f, indent=2, ensure_ascii=False)
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                # Try up to 2 times with different delays
+                for attempt in range(2):
+                    try:
+                        logger.info(f"Fetching Onlyfans Feed for {username}, attempt {attempt + 1}")
+                        response = await client.get(api_url, headers=headers)
+                        logger.info(f"Response status: {response.status_code}")
+                        break
+                    except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                        if attempt < 1:
+                            logger.warning(f"Attempt {attempt + 1} failed: {e}, retrying...")
+                            await asyncio.sleep(2)
+                            continue
+                        else:
+                            raise
+                
+                if response.status_code == 404:
+                    await query.edit_message_text(
+                        f"❌ No archived feed found for @{username}.\n\n"
+                        "This creator may not be available in the archive database."
+                    )
+                    return
+                
+                if response.status_code == 403:
+                    # Try alternative approach: provide direct link and explain
+                    await query.edit_message_text(
+                        f"⚠️ **Access Currently Unavailable**\n\n"
+                        f"The archive database is currently blocking automated requests for @{username}.\n\n"
+                        f"**View Feed Manually:**\n"
+                        f"You can browse the archived OnlyFans feed directly by opening this link in your browser:\n\n"
+                        f"🔗 `https://coomer.st/onlyfans/user/{username}`\n\n"
+                        f"💡 **Note:** The link provides access to all archived posts, photos, and videos from this creator's OnlyFans.",
+                        parse_mode='Markdown',
+                        disable_web_page_preview=False
+                    )
+                    return
+                
+                if response.status_code != 200:
+                    await query.edit_message_text(
+                        f"❌ Failed to fetch Onlyfans Feed (Status: {response.status_code}).\n\n"
+                        "Please try again later."
+                    )
+                    return
+                
+                posts = response.json()
+                
+                # Cache the posts
+                _onlyfans_feed_cache[username] = {
+                    'data': posts,
+                    'timestamp': datetime.now()
+                }
+                logger.info(f"✓ Cached OnlyFans feed for {username} (cache size: {len(_onlyfans_feed_cache)})")
+                
+                # Save to coomer.json for reference
+                with open('coomer.json', 'w', encoding='utf-8') as f:
+                    json.dump(posts, f, indent=2, ensure_ascii=False)
             
             if not posts or len(posts) == 0:
                 await query.edit_message_text(
@@ -1453,23 +1665,25 @@ async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> No
                     "The feed may be empty or not yet archived."
                 )
                 return
-            
-            # Store posts in session for pagination
-            session.of_feed_posts = posts
-            session.of_feed_username = username
-            
-            # Display posts
-            await display_of_feed_page(query, session, page)
-            
-    except httpx.TimeoutException:
-        await query.edit_message_text("❌ Request timed out. The archive server may be slow. Please try again.")
-    except Exception as e:
-        logger.error(f"Error fetching archived feed: {e}")
-        await query.edit_message_text("❌ An error occurred while fetching the archived feed.")
+        
+        except httpx.TimeoutException:
+            await query.edit_message_text("❌ Request timed out. The archive server may be slow. Please try again.")
+            return
+        except Exception as e:
+            logger.error(f"Error fetching archived feed: {e}")
+            await query.edit_message_text("❌ An error occurred while fetching the archived feed.")
+            return
+    
+    # Store posts in session for pagination
+    session.of_feed_posts = posts
+    session.of_feed_username = username
+    
+    # Display posts
+    await display_of_feed_page(query, session, page)
 
 
 async def display_of_feed_page(query, session, page: int) -> None:
-    """Display a page of OF Feed posts with clickable links."""
+    """Display a page of Onlyfans Feed posts with clickable links."""
     posts = session.of_feed_posts
     username = session.of_feed_username
     
@@ -1489,7 +1703,7 @@ async def display_of_feed_page(query, session, page: int) -> None:
     from datetime import datetime
     import httpx
     
-    header_text = f"📱 **OF Feed: @{username}**\n\n"
+    header_text = f"📱 **Onlyfans Feed: @{username}**\n\n"
     header_text += f"📄 Showing posts {start_idx + 1}-{end_idx} of {len(posts)}\n"
     header_text += f"📖 Page {page + 1} of {total_pages}\n\n"
     header_text += "Loading media..."
@@ -1517,20 +1731,29 @@ async def display_of_feed_page(query, session, page: int) -> None:
     }
     
     # Send each post with actual media
-    for idx, post in enumerate(page_posts, start=start_idx):
+    async def fetch_post_details(idx, post):
+        """Fetch and process a single post."""
         try:
             post_id = post.get('id', '')
+            
+            # Check cache first
+            _clean_onlyfans_cache()
+            post_cache_key = f"{username}:{post_id}"
+            if post_cache_key in _onlyfans_post_cache:
+                logger.debug(f"✓ Post cache hit for {post_id}")
+                return _onlyfans_post_cache[post_cache_key]['data']
             
             # Fetch detailed post data to get media URLs
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 post_detail_url = f"https://coomer.st/api/v1/onlyfans/user/{username}/post/{post_id}"
-                headers['Referer'] = f'https://coomer.st/onlyfans/user/{username}/post/{post_id}'
+                headers_copy = headers.copy()
+                headers_copy['Referer'] = f'https://coomer.st/onlyfans/user/{username}/post/{post_id}'
                 
-                response = await client.get(post_detail_url, headers=headers)
+                response = await client.get(post_detail_url, headers=headers_copy)
                 
                 if response.status_code != 200:
                     logger.warning(f"Failed to fetch post {post_id}: {response.status_code}")
-                    continue
+                    return None
                 
                 post_detail = response.json()
                 post_data = post_detail.get('post', {})
@@ -1549,7 +1772,6 @@ async def display_of_feed_page(query, session, page: int) -> None:
                 
                 # Escape markdown special characters
                 def escape_text(text):
-                    # Remove or escape problematic characters for Markdown
                     for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
                         text = text.replace(char, '')
                     return text
@@ -1558,7 +1780,6 @@ async def display_of_feed_page(query, session, page: int) -> None:
                 if title:
                     caption += f"\n{escape_text(title)}"
                 elif content:
-                    # Truncate content if too long
                     if len(content) > 200:
                         content = content[:197] + '...'
                     caption += f"\n{escape_text(content)}"
@@ -1577,15 +1798,12 @@ async def display_of_feed_page(query, session, page: int) -> None:
                 
                 # Add main file if exists
                 if file_info and file_info.get('path'):
-                    # Use img.coomer.st for images
                     file_url = f"https://img.coomer.st/thumbnail/data{file_info['path']}"
                     file_name = file_info.get('name', '')
                     
-                    # Determine if image or video based on extension
                     if any(file_name.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
                         media_items.append(('photo', file_url))
                     elif any(file_name.lower().endswith(ext) for ext in ['.mp4', '.mov', '.avi', '.webm']):
-                        # Videos use coomer.st domain
                         file_url = f"https://coomer.st/data{file_info['path']}"
                         media_items.append(('video', file_url))
                 
@@ -1607,33 +1825,83 @@ async def display_of_feed_page(query, session, page: int) -> None:
                             attach_url = f"https://coomer.st/data{attachment['path']}"
                             media_items.append(('video', attach_url))
                 
-                # Send media to Telegram
-                if media_items:
-                    for media_type, media_url in media_items:
-                        try:
-                            # Send as text message with link and enable preview
-                            media_icon = "🖼️" if media_type == 'photo' else "🎬"
-                            message_text = f"{caption}\n\n{media_icon} Media Link:\n{media_url}" if caption else f"{media_icon} Media Link:\n{media_url}"
-                            
-                            await query.message.reply_text(
-                                message_text,
-                                disable_web_page_preview=False  # Enable preview to show thumbnails
-                            )
-                            
-                            # Only send caption with first media item
-                            caption = None
-                            
-                        except Exception as e:
-                            logger.error(f"Failed to send media link for post {post_id}: {e}")
-                else:
-                    # No media, send text-only message
-                    await query.message.reply_text(
-                        f"{caption}\n\n💬 Text-only post"
-                    )
+                result = (caption, media_items)
+                
+                # Cache the result
+                _onlyfans_post_cache[post_cache_key] = {
+                    'data': result,
+                    'timestamp': datetime.now()
+                }
+                logger.debug(f"✓ Cached post {post_id}")
+                
+                return result
         
         except Exception as e:
-            logger.error(f"Error processing OF feed post {idx + 1}: {e}")
+            logger.error(f"Error processing Onlyfans Feed post {idx + 1}: {e}")
+            return None
+    
+    # Fetch all post details concurrently (in batches to avoid overwhelming)
+    batch_size = 5  # Increased from 3 to 5 for faster processing
+    all_post_data = []
+    
+    for batch_start in range(0, len(page_posts), batch_size):
+        batch_end = min(batch_start + batch_size, len(page_posts))
+        batch_posts = page_posts[batch_start:batch_end]
+        
+        # Create tasks for this batch
+        tasks = [
+            fetch_post_details(start_idx + batch_start + i, post)
+            for i, post in enumerate(batch_posts)
+        ]
+        
+        # Fetch batch concurrently
+        batch_results = await asyncio.gather(*tasks)
+        all_post_data.extend(batch_results)
+        
+        # Reduced delay between batches from 0.5s to 0.2s
+        if batch_end < len(page_posts):
+            await asyncio.sleep(0.2)
+    
+    # Send media to Telegram - OPTIMIZED WITH CONCURRENT SENDING
+    # Group messages into batches for concurrent sending
+    message_tasks = []
+    
+    for post_data in all_post_data:
+        if not post_data:
             continue
+            
+        caption, media_items = post_data
+        
+        if media_items:
+            for media_type, media_url in media_items:
+                media_icon = "🖼️" if media_type == 'photo' else "🎬"
+                message_text = f"{caption}\n\n{media_icon} Media Link:\n{media_url}" if caption else f"{media_icon} Media Link:\n{media_url}"
+                
+                # Create task for sending message
+                message_tasks.append(
+                    query.message.reply_text(message_text, disable_web_page_preview=False)
+                )
+                
+                # Only send caption with first media item
+                caption = None
+        else:
+            # No media, send text-only message
+            message_tasks.append(
+                query.message.reply_text(f"{caption}\n\n💬 Text-only post")
+            )
+    
+    # Send all messages concurrently in batches to avoid Telegram rate limits
+    batch_size = 10
+    for i in range(0, len(message_tasks), batch_size):
+        batch = message_tasks[i:i+batch_size]
+        try:
+            await asyncio.gather(*batch, return_exceptions=True)
+        except Exception as e:
+            logger.error(f"Error sending message batch: {e}")
+        
+        # Small delay between batches to respect rate limits
+        if i + batch_size < len(message_tasks):
+            await asyncio.sleep(0.1)
     
     # Send navigation message at the end
     nav_text = f"\n� Page {page + 1} of {total_pages}\n\nUse the buttons below to navigate:"
@@ -1662,7 +1930,7 @@ async def display_of_feed_page(query, session, page: int) -> None:
 
 
 async def handle_of_feed_page(query, session, data: str, bot_instance) -> None:
-    """Handle OF Feed page navigation."""
+    """Handle Onlyfans Feed page navigation."""
     page = int(data.split("_")[3])
     
     if not hasattr(session, 'of_feed_posts') or not session.of_feed_posts:
@@ -1673,7 +1941,7 @@ async def handle_of_feed_page(query, session, data: str, bot_instance) -> None:
 
 
 async def handle_of_feed_skip_menu(query, session, data: str) -> None:
-    """Show smart menu to skip to a specific page in OF Feed."""
+    """Show smart menu to skip to a specific page in Onlyfans Feed."""
     current_page = int(data.split("_")[3])
     
     if not hasattr(session, 'of_feed_posts') or not session.of_feed_posts:
@@ -1802,19 +2070,19 @@ Select a page to jump to:
 
 
 async def handle_of_feed_goto(query, session, data: str, bot_instance) -> None:
-    """Go to specific OF Feed page."""
+    """Go to specific Onlyfans Feed page."""
     page = int(data.split("_")[3])
     await display_of_feed_page(query, session, page)
 
 
 async def handle_of_feed_cancel(query, session, data: str) -> None:
-    """Cancel OF Feed skip and return to navigation."""
+    """Cancel Onlyfans Feed skip and return to navigation."""
     current_page = int(data.split("_")[3])
     await show_of_feed_navigation(query, session, current_page)
 
 
 async def show_of_feed_navigation(query, session, page: int) -> None:
-    """Show only the navigation menu for OF Feed without re-sending posts."""
+    """Show only the navigation menu for Onlyfans Feed without re-sending posts."""
     if not hasattr(session, 'of_feed_posts') or not session.of_feed_posts:
         await query.edit_message_text("❌ Archived feed data not available.")
         return

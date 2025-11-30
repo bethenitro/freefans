@@ -7,14 +7,49 @@ import re
 import csv
 from typing import List, Dict, Optional
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+import hashlib
+from scrapers.fuzzy_search import FuzzySearchEngine
 
 logger = logging.getLogger(__name__)
+
+# Global fuzzy search engine instance
+_fuzzy_engine = FuzzySearchEngine(min_score=60)
+
+# Cache for search results
+_search_cache = {}
+_search_cache_ttl = timedelta(minutes=30)  # Cache for 30 minutes
+_search_cache_max_size = 50
+
+
+def _get_search_hash(query: str) -> str:
+    """Generate hash for search query."""
+    return hashlib.md5(query.lower().encode('utf-8')).hexdigest()[:12]
+
+
+def _clean_search_cache():
+    """Remove expired entries from search cache."""
+    global _search_cache
+    now = datetime.now()
+    expired_keys = [
+        key for key, value in _search_cache.items()
+        if now - value['timestamp'] > _search_cache_ttl
+    ]
+    for key in expired_keys:
+        del _search_cache[key]
+    
+    # Limit cache size
+    if len(_search_cache) > _search_cache_max_size:
+        sorted_items = sorted(_search_cache.items(), key=lambda x: x[1]['timestamp'])
+        for key, _ in sorted_items[:len(_search_cache) - _search_cache_max_size]:
+            del _search_cache[key]
 
 
 def parse_search_results(html: str) -> List[Dict]:
     """
     Parse search results from simpcity.cr search page.
     Filters for OnlyFans forum entries with more than 1 reply.
+    Uses caching to avoid re-parsing same HTML.
     
     Returns list of dicts with:
         - title: Creator title/name
@@ -26,6 +61,14 @@ def parse_search_results(html: str) -> List[Dict]:
         - snippet: Content snippet
         - thumbnail: Thumbnail URL if available
     """
+    # Check cache first
+    html_hash = hashlib.md5(html.encode('utf-8')).hexdigest()[:16]
+    if html_hash in _search_cache:
+        cache_entry = _search_cache[html_hash]
+        if datetime.now() - cache_entry['timestamp'] < _search_cache_ttl:
+            logger.debug(f"Search results cache hit for hash {html_hash}")
+            return cache_entry['data']
+    
     try:
         soup = BeautifulSoup(html, 'html.parser')
         results = []
@@ -138,13 +181,21 @@ def parse_search_results(html: str) -> List[Dict]:
                 continue
         
         logger.info(f"Parsed {len(results)} valid search results (OnlyFans forum, >1 reply)")
+        
+        logger.info(f"Parsed {len(results)} search results")
+        
+        # Cache the results
+        _search_cache[html_hash] = {
+            'data': results,
+            'timestamp': datetime.now()
+        }
+        _clean_search_cache()
+        
         return results
         
     except Exception as e:
         logger.error(f"Error parsing search results: {e}")
         return []
-
-
 def build_search_url(creator_name: str) -> str:
     """
     Build the search URL for simpcity.cr
@@ -253,3 +304,63 @@ def extract_creator_name_from_title(title: str) -> str:
     cleaned = re.sub(r'^[\s|]+|[\s|]+$', '', cleaned)
     
     return cleaned
+
+
+def rank_search_results_by_query(query: str, results: List[Dict], limit: int = 10) -> List[Dict]:
+    """
+    Rank and filter search results using fuzzy matching to find the best matches for the query.
+    
+    Args:
+        query: The original search query (creator name)
+        results: List of parsed search results
+        limit: Maximum number of results to return
+    
+    Returns:
+        Ranked and filtered list of results with fuzzy_score added
+    """
+    if not results:
+        return []
+    
+    logger.info(f"Ranking {len(results)} search results for query: '{query}'")
+    
+    # Apply fuzzy search ranking without boost factors
+    ranked_results = _fuzzy_engine.rank_search_results(
+        query=query,
+        search_results=results,
+        limit=limit,
+        boost_factors={}  # No boost factors - pure fuzzy match scoring
+    )
+    
+    logger.info(f"Fuzzy search returned {len(ranked_results)} ranked results")
+    
+    return ranked_results
+
+
+def get_best_match(query: str, results: List[Dict], threshold: float = 70) -> Optional[Dict]:
+    """
+    Get the single best match from search results using fuzzy matching.
+    
+    Args:
+        query: The original search query (creator name)
+        results: List of parsed search results
+        threshold: Minimum fuzzy score threshold (0-100)
+    
+    Returns:
+        Best matching result or None if no match above threshold
+    """
+    if not results:
+        return None
+    
+    match = _fuzzy_engine.get_best_match(
+        query=query,
+        candidates=results,
+        threshold=int(threshold)
+    )
+    
+    if match:
+        best_result, score = match
+        logger.info(f"Best match: '{best_result.get('title')}' with score {score:.1f}")
+        return best_result
+    
+    logger.info(f"No match found above threshold {threshold}")
+    return None

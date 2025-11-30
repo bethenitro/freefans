@@ -32,8 +32,8 @@ class UserSession:
         self.creator_selection_page = 0  # For paginating creator options
         self.is_simpcity_search = False  # Flag to indicate SimpCity search results
         
-        # OF Feed data
-        self.of_feed_posts = None  # Store fetched OF feed posts
+        # Onlyfans Feed data
+        self.of_feed_posts = None  # Store fetched Onlyfans Feed posts
         self.of_feed_username = None  # Store OF username
         
         # User interaction tracking
