@@ -1,0 +1,8 @@
+python-telegram-bot==20.7
+python-decouple==3.8
+httpx==0.28.1
+beautifulsoup4==4.14.2
+lxml==6.0.2
+
+# Additional dependencies
+python-dateutil==2.9.0

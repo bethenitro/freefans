@@ -1,0 +1,9 @@
+# Ignore Python bytecode files and __pycache__ folder
+__pycache__/
+*.py[cod]
+*.csv
+*.html
+curl_config.txt
+# Ignore .env file (commonly used for environment variables)
+.env
+env/
