@@ -4,6 +4,8 @@ __pycache__/
 *.csv
 *.html
 curl_config.txt
+video_domains.txt
+content_domains.txt
 # Ignore .env file (commonly used for environment variables)
 .env
 env/

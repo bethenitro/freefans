@@ -90,17 +90,14 @@ def format_directory_text(creator_name: str, content_directory: dict, filters: d
     """Format content directory display text."""
     total_items = len(content_directory.get('items', []))
     total_pictures = len(content_directory.get('preview_images', []))
+    total_videos = len(content_directory.get('video_links', []))
     
     return f"""
 📁 Content Directory for: {creator_name}
 📊 Total Items: {total_items}
 🖼️ Preview Pictures: {total_pictures}
+🎬 Videos: {total_videos}
 📅 Last Updated: {content_directory.get('last_updated', 'Unknown')}
-
-🏷️ Active Filters:
-• Content Type: {filters.get('content_type', 'All')}
-• Date Range: {filters.get('date_range', 'All Time')}
-• Quality: {filters.get('quality', 'Any')}
 
 Browse content below:
     """
@@ -139,7 +136,6 @@ def create_welcome_keyboard() -> InlineKeyboardMarkup:
     """Create welcome screen keyboard."""
     keyboard = [
         [InlineKeyboardButton("🔍 Search Creator", callback_data="search_creator")],
-        [InlineKeyboardButton("⚙️ Set Filters", callback_data="set_filters")],
         [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -168,9 +164,31 @@ def create_picture_navigation_keyboard(page: int, total_pages: int, end_idx: int
     if nav_buttons:
         keyboard.append(nav_buttons)
     
-    # Add skip to page button if there are more than 10 pages
-    if total_pages > 10:
+    # Add skip to page button if there are more than 1 page
+    if total_pages > 1:
         keyboard.append([InlineKeyboardButton(f"⏩ Skip to Page...", callback_data=f"picture_skip_{page}")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_list")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def create_video_navigation_keyboard(page: int, total_pages: int, end_idx: int, total_videos: int) -> InlineKeyboardMarkup:
+    """Create keyboard for video navigation."""
+    keyboard = []
+    nav_buttons = []
+    
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous 10", callback_data=f"video_page_{page - 1}"))
+    if end_idx < total_videos:
+        nav_buttons.append(InlineKeyboardButton("Next 10 ➡️", callback_data=f"video_page_{page + 1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    # Add skip to page button if there are more than 1 page
+    if total_pages > 1:
+        keyboard.append([InlineKeyboardButton(f"⏩ Skip to Page...", callback_data=f"video_skip_{page}")])
     
     keyboard.append([InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_list")])
     

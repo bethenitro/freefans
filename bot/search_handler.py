@@ -119,17 +119,21 @@ async def display_content_directory(update: Update, bot_instance, content_direct
     
     # Create directory display
     total_pictures = len(content_directory.get('preview_images', []))
+    total_videos = len(content_directory.get('video_links', []))
     
     directory_text = format_directory_text(creator_name, content_directory, session.filters)
     
-    # Create pagination keyboard
-    keyboard = create_content_keyboard(content_directory['items'], page=0)
+    # Create keyboard with only Pictures and Videos buttons (no content items)
+    keyboard = []
     
     # Add Pictures button if there are preview images
     if total_pictures > 0:
         keyboard.append([InlineKeyboardButton(f"🖼️ View Pictures ({total_pictures})", callback_data="view_pictures")])
     
-    keyboard.append([InlineKeyboardButton("⚙️ Change Filters", callback_data="set_filters")])
+    # Add Videos button if there are video links
+    if total_videos > 0:
+        keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
+    
     keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)

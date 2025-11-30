@@ -9,7 +9,7 @@ from scrapers.fetcher import HTTPFetcher
 from scrapers.csv_handler import search_model_in_csv
 from scrapers.parsers import (
     extract_max_pages, extract_social_links, extract_preview_images,
-    extract_content_links, group_content_by_type
+    extract_content_links, extract_video_links, group_content_by_type
 )
 
 logger = logging.getLogger(__name__)
@@ -42,8 +42,12 @@ class SimpleCityScraper:
         return extract_preview_images(html)
     
     def extract_content_links(self, html: str):
-        """Extract bunkr, pixl, gofile, and other content links from HTML"""
+        """Extract bunkr, gofile, and other content links from HTML"""
         return extract_content_links(html)
+    
+    def extract_video_links(self, html: str):
+        """Extract video links with intelligent titles"""
+        return extract_video_links(html)
     
     def group_content_by_type(self, content_items):
         """Group content items by type"""
@@ -82,6 +86,10 @@ class SimpleCityScraper:
             preview_images = self.extract_preview_images(html)
             logger.info(f"Found {len(preview_images)} preview images on first page")
             
+            # Extract video links
+            video_links = self.extract_video_links(html)
+            logger.info(f"Found {len(video_links)} video links on first page")
+            
             # Extract max pages
             total_pages = self.extract_max_pages(html)
             logger.info(f"Total pages available: {total_pages}")
@@ -92,6 +100,7 @@ class SimpleCityScraper:
             # Extract content from first page
             all_content = self.extract_content_links(html)
             all_images = preview_images.copy()
+            all_videos = video_links.copy()
             
             # Fetch additional pages if available
             if pages_to_scrape > 1:
@@ -106,6 +115,9 @@ class SimpleCityScraper:
                         
                         page_images = self.extract_preview_images(page_html)
                         all_images.extend(page_images)
+                        
+                        page_videos = self.extract_video_links(page_html)
+                        all_videos.extend(page_videos)
                     
                     # Small delay to avoid rate limiting
                     await asyncio.sleep(1)
@@ -126,8 +138,17 @@ class SimpleCityScraper:
                     seen_image_urls.add(item['url'])
                     unique_images.append(item)
             
+            # Remove duplicate videos
+            unique_videos = []
+            seen_video_urls = set()
+            for item in all_videos:
+                if item['url'] not in seen_video_urls:
+                    seen_video_urls.add(item['url'])
+                    unique_videos.append(item)
+            
             logger.info(f"Found {len(unique_content)} unique content items")
             logger.info(f"Found {len(unique_images)} unique preview images")
+            logger.info(f"Found {len(unique_videos)} unique video links")
             
             return {
                 'creator_name': matched_name,
@@ -140,6 +161,8 @@ class SimpleCityScraper:
                 'total_items': len(unique_content),
                 'preview_images': unique_images,
                 'total_images': len(unique_images),
+                'video_links': unique_videos,
+                'total_videos': len(unique_videos),
                 'social_links': social_links
             }
             

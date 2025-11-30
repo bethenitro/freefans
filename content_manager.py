@@ -84,6 +84,20 @@ class ContentManager:
                 }
                 preview_items.append(preview_item)
             
+            # Transform video links
+            video_items = []
+            for idx, item in enumerate(scrape_result.get('video_links', [])):
+                video_item = {
+                    'title': item.get('title', f"Video #{idx + 1}"),
+                    'type': '🎬 Video',
+                    'url': item['url'],
+                    'domain': item['domain'],
+                    'content_type': 'videos',
+                    'upload_date': datetime.now().strftime('%Y-%m-%d'),
+                    'quality': 'HD',
+                }
+                video_items.append(video_item)
+            
             result = {
                 'creator': scrape_result['creator_name'],
                 'similarity': scrape_result['similarity'],
@@ -93,6 +107,8 @@ class ContentManager:
                 'items': content_items,
                 'preview_images': preview_items,  # Add preview images
                 'total_preview_images': len(preview_items),
+                'video_links': video_items,  # Add video links
+                'total_video_links': len(video_items),
                 'pages_scraped': scrape_result['pages_scraped'],
                 'total_pages': scrape_result['total_pages'],
                 'social_links': scrape_result.get('social_links', {})  # Pass through social links
