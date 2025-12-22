@@ -227,13 +227,13 @@ class SimpleCityScraper:
             logger.error(f"Error in search_creator_options: {e}")
             return None
     
-    async def scrape_creator_content(self, creator_name: str, max_pages: int = 3, start_page: int = 1, direct_url: Optional[str] = None) -> Optional[Dict]:
+    async def scrape_creator_content(self, creator_name: str, max_pages: int = None, start_page: int = 1, direct_url: Optional[str] = None) -> Optional[Dict]:
         """
         Main Fetching function that searches CSV and scrapes content
         
         Args:
             creator_name: Name of the creator to search for
-            max_pages: Maximum number of pages to scrape (default 20)
+            max_pages: Maximum number of pages to scrape (None = all pages, default 3)
             start_page: Starting page number (default 1, for fetching additional pages)
             direct_url: Direct URL to scrape (bypasses CSV search, for pre-selected creators)
         """
@@ -287,56 +287,59 @@ class SimpleCityScraper:
             logger.info(f"Total pages available: {total_pages}")
             
             # Limit pages to scrape (start from start_page and scrape up to max_pages)
-            end_page = min(start_page + max_pages - 1, total_pages)
+            # If max_pages is None, scrape all available pages
+            if max_pages is None:
+                end_page = total_pages
+            else:
+                end_page = min(start_page + max_pages - 1, total_pages)
             pages_to_scrape = end_page - start_page + 1
+            logger.info(f"Will scrape {pages_to_scrape} pages (from {start_page} to {end_page})")
             
             # Create lists for aggregating content
             all_images = preview_images.copy()
             all_videos = video_links.copy()
             
-            # Fetch additional pages if available - OPTIMIZED WITH CONCURRENT FETCHING
+            # Fetch additional pages if available - ENHANCED WITH MULTITHREADED FETCHING
             if pages_to_scrape > 1 or start_page > 1:
                 # Determine the range of pages to fetch
                 page_start = start_page + 1 if start_page == 1 else start_page
                 page_end = end_page + 1
                 
-                # Create tasks for fetching pages concurrently
-                async def fetch_and_parse_page(page_num):
-                    """Fetch and parse a single page."""
-                    page_url = f"{url}page-{page_num}"
-                    logger.info(f"Fetching page {page_num}/{total_pages}: {page_url}")
-                    
-                    page_html = await self.fetch_page(page_url)
+                # Create URLs for all pages to fetch
+                page_urls = [f"{url}page-{page_num}" for page_num in range(page_start, page_end)]
+                
+                logger.info(f"🚀 Fetching {len(page_urls)} pages concurrently with enhanced multithreading...")
+                
+                # Use the enhanced multithreaded fetcher
+                page_results = await self.fetcher.fetch_multiple_pages(
+                    urls=page_urls,
+                    max_concurrent=5  # Conservative concurrency for stability
+                )
+                
+                # Process results concurrently
+                async def parse_page_result(url_content_tuple):
+                    """Parse a single page result."""
+                    page_url, page_html = url_content_tuple
                     if page_html:
-                        # Use concurrent parsing for better performance
-                        page_content, page_images, page_videos = await parse_page_content_concurrent(page_html)
-                        return page_content, page_images, page_videos
-                    return [], [], []
+                        page_num = int(page_url.split('page-')[1]) if 'page-' in page_url else 1
+                        logger.debug(f"✅ Parsing page {page_num}")
+                        return await parse_page_content_concurrent(page_html)
+                    else:
+                        page_num = int(page_url.split('page-')[1]) if 'page-' in page_url else 1
+                        logger.warning(f"❌ Failed to fetch page {page_num}")
+                        return [], [], []
                 
-                # Fetch all pages concurrently with gather
-                page_tasks = [fetch_and_parse_page(page_num) for page_num in range(page_start, page_end)]
-                
-                # Add small delays between task creation to avoid overwhelming the server
-                # But still much faster than sequential fetching
-                if len(page_tasks) > 10:
-                    # For large batches, process in groups of 10 (increased from 5)
-                    results = []
-                    for i in range(0, len(page_tasks), 10):
-                        batch = page_tasks[i:i+10]
-                        batch_results = await asyncio.gather(*batch)
-                        results.extend(batch_results)
-                        # Small delay between batches (reduced from 0.5s to 0.2s)
-                        if i + 10 < len(page_tasks):
-                            await asyncio.sleep(0.2)
-                else:
-                    # For small batches, fetch all at once
-                    results = await asyncio.gather(*page_tasks)
+                # Parse all pages concurrently
+                parse_tasks = [parse_page_result(result) for result in page_results]
+                parse_results = await asyncio.gather(*parse_tasks)
                 
                 # Aggregate results from all pages
-                for page_content, page_images, page_videos in results:
+                for page_content, page_images, page_videos in parse_results:
                     all_content.extend(page_content)
                     all_images.extend(page_images)
                     all_videos.extend(page_videos)
+                
+                logger.info(f"✅ Enhanced multithreaded fetching completed for {len(page_urls)} pages")
             
             # Remove duplicates based on URL
             unique_content = []

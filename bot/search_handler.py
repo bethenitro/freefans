@@ -33,8 +33,8 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         search_message = await send_message_with_retry(
             update.message.reply_text,
-            f"🔍 Searching for '{creator_name}'...\n"
-            "This may take a few moments."
+            f"🔍 Searching for {creator_name}...\n\n"
+            f"Finding the hottest content for you 🔥"
         )
     except (TimedOut, NetworkError) as e:
         logger.error(f"Failed to send search message: {e}")
@@ -48,8 +48,12 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
             try:
                 await send_message_with_retry(
                     search_message.edit_text,
-                    f"❌ No content found for '{creator_name}'.\n\n"
-                    "Try checking the spelling or searching for a different creator."
+                    f"😔 No content found for '{creator_name}'\n\n"
+                    f"Try this:\n"
+                    f"• Double-check the spelling\n"
+                    f"• Try a different name or alias\n"
+                    f"• Search for another creator\n\n"
+                    f"We're always adding new content, so check back soon! 💋"
                 )
             except (TimedOut, NetworkError):
                 pass
@@ -151,15 +155,16 @@ async def display_creator_selection_page(message, session, page: int = 0):
     
     # Build the selection message
     if is_simpcity:
-        select_text = f"🔍 Extended Search Results for '{creator_name}':\n\n"
-        select_text += f"Found {len(options)} additional matches.\n"
-        select_text += "Please select the correct creator:\n\n"
+        select_text = f"🔥 Extended Search Results 🔥\n\n"
+        select_text += f"Found {len(options)} matches for '{creator_name}'\n\n"
     else:
-        select_text = f"🔍 Found {len(options)} matches for '{creator_name}':\n\n"
-        select_text += "Please select the correct creator:\n\n"
+        select_text = f"✨ Found {len(options)} creators ✨\n\n"
+        select_text += f"Searching for: '{creator_name}'\n\n"
     
     if total_pages > 1:
-        select_text += f"📄 Page {page + 1}/{total_pages}\n\n"
+        select_text += f"📄 Page {page + 1} of {total_pages}\n\n"
+    
+    select_text += "Select the creator you want 👇\n"
     
     keyboard = []
     for i, option in enumerate(page_options):

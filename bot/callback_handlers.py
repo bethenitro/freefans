@@ -16,58 +16,15 @@ from bot.ui_components import (
     format_filter_settings_text, format_content_details_text,
     create_content_details_keyboard, format_directory_text,
     create_content_keyboard, create_picture_navigation_keyboard,
-    create_video_navigation_keyboard
+    create_video_navigation_keyboard, create_content_directory_keyboard
 )
 
 logger = logging.getLogger(__name__)
 
-# OnlyFans feed cache
-_onlyfans_feed_cache = {}
-_onlyfans_feed_cache_ttl = timedelta(hours=1)  # Cache OF feeds for 1 hour
-_onlyfans_feed_cache_max_size = 50
-
-# OnlyFans post details cache
-_onlyfans_post_cache = {}
-_onlyfans_post_cache_ttl = timedelta(hours=2)  # Cache post details for 2 hours
-_onlyfans_post_cache_max_size = 200
-
-# Picture/Video page message cache
+# Picture/Video page message cache (still needed for UI state)
 _media_page_cache = {}
 _media_page_cache_ttl = timedelta(minutes=30)  # Cache formatted messages for 30 minutes
 _media_page_cache_max_size = 100
-
-
-def _clean_onlyfans_cache():
-    """Remove expired entries from OnlyFans caches."""
-    global _onlyfans_feed_cache, _onlyfans_post_cache
-    now = datetime.now()
-    
-    # Clean feed cache
-    expired_keys = [
-        key for key, value in _onlyfans_feed_cache.items()
-        if now - value['timestamp'] > _onlyfans_feed_cache_ttl
-    ]
-    for key in expired_keys:
-        del _onlyfans_feed_cache[key]
-    
-    if len(_onlyfans_feed_cache) > _onlyfans_feed_cache_max_size:
-        sorted_items = sorted(_onlyfans_feed_cache.items(), key=lambda x: x[1]['timestamp'])
-        for key, _ in sorted_items[:len(_onlyfans_feed_cache) - _onlyfans_feed_cache_max_size]:
-            del _onlyfans_feed_cache[key]
-    
-    # Clean post cache
-    expired_keys = [
-        key for key, value in _onlyfans_post_cache.items()
-        if now - value['timestamp'] > _onlyfans_post_cache_ttl
-    ]
-    for key in expired_keys:
-        del _onlyfans_post_cache[key]
-    
-    if len(_onlyfans_post_cache) > _onlyfans_post_cache_max_size:
-        sorted_items = sorted(_onlyfans_post_cache.items(), key=lambda x: x[1]['timestamp'])
-        for key, _ in sorted_items[:len(_onlyfans_post_cache) - _onlyfans_post_cache_max_size]:
-            del _onlyfans_post_cache[key]
-
 
 def _clean_media_page_cache():
     """Remove expired entries from media page cache."""
@@ -85,7 +42,6 @@ def _clean_media_page_cache():
         for key, _ in sorted_items[:len(_media_page_cache) - _media_page_cache_max_size]:
             del _media_page_cache[key]
 
-
 def _get_cached_media_page(media_type: str, creator_url: str, page: int) -> Optional[list]:
     """Get cached formatted media page messages."""
     _clean_media_page_cache()
@@ -96,7 +52,6 @@ def _get_cached_media_page(media_type: str, creator_url: str, page: int) -> Opti
         return _media_page_cache[cache_key]['data']
     return None
 
-
 def _cache_media_page(media_type: str, creator_url: str, page: int, messages: list):
     """Cache formatted media page messages."""
     cache_key = f"{media_type}:{creator_url}:{page}"
@@ -106,15 +61,13 @@ def _cache_media_page(media_type: str, creator_url: str, page: int, messages: li
     }
     logger.debug(f"✓ Cached {media_type} page {page} (cache size: {len(_media_page_cache)})")
 
-
 def escape_markdown(text: str) -> str:
     """Escape special characters for Markdown v2."""
     # Characters that need to be escaped in Markdown
-    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    special_chars = ['_', '', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in special_chars:
         text = text.replace(char, f'\\{char}')
     return text
-
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_instance) -> None:
     """Handle callback queries from inline keyboards."""
@@ -203,11 +156,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     elif data.startswith("of_feed_cancel_"):
         await handle_of_feed_cancel(query, session, data)
 
-
 async def handle_search_creator(query) -> None:
     """Handle search creator callback."""
     await query.edit_message_text("🔍 Please send me the name of the creator you want to search for:")
-
 
 async def handle_search_on_simpcity(query, session, bot_instance) -> None:
     """Handle extended search request when CSV results don't match."""
@@ -270,7 +221,6 @@ async def handle_search_on_simpcity(query, session, bot_instance) -> None:
             "Please try again later."
         )
 
-
 async def handle_creator_page_change(query, session, data: str) -> None:
     """Handle pagination for creator selection."""
     try:
@@ -284,7 +234,6 @@ async def handle_creator_page_change(query, session, data: str) -> None:
     except (IndexError, ValueError) as e:
         logger.error(f"Error handling creator page change: {e}")
         await query.answer("❌ Error changing page", show_alert=True)
-
 
 async def handle_select_creator(query, session, data: str, bot_instance) -> None:
     """Handle user selection of a creator from multiple options."""
@@ -351,6 +300,15 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
                 "Please try again later."
             )
             return
+        
+        # Check if it's a cache miss
+        if content_directory.get('cache_miss'):
+            await query.edit_message_text(
+                f"📭 Content for '{creator_name}' is not cached yet.\n\n"
+                f"🔄 This creator will be added to the cache during the next refresh cycle.\n\n"
+                f"💡 Tip: Try searching for another creator or check back in a few hours!"
+            )
+            return
             
         # Update session
         session.current_directory = content_directory
@@ -366,26 +324,10 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         has_onlyfans = social_links.get('onlyfans') is not None
         directory_text = format_directory_text(creator_name, content_directory, session.filters)
         
-        # Create keyboard
-        keyboard = []
-        
-        if total_pictures > 0:
-            keyboard.append([InlineKeyboardButton(f"🖼️ View Pictures ({total_pictures})", callback_data="view_pictures")])
-        
-        if total_videos > 0:
-            keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
-        
-        # Add Onlyfans Feed button if OnlyFans link is available
-        if has_onlyfans:
-            keyboard.append([InlineKeyboardButton("📱 Onlyfans Feed", callback_data="view_of_feed")])
-        
-        # Always show Load More if more content available
-        if has_more_pages:
-            keyboard.append([InlineKeyboardButton("⬇️ Load More Content", callback_data="load_more_pages")])
-        
-        keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Create modern keyboard using helper function
+        reply_markup = create_content_directory_keyboard(
+            total_pictures, total_videos, has_onlyfans, has_more_pages
+        )
         
         await send_message_with_retry(
             query.message.reply_text,
@@ -410,7 +352,6 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
             "Please try again later."
         )
 
-
 async def handle_select_simpcity(query, session, data: str, bot_instance) -> None:
     """Handle user selection of a creator from extended search results."""
     if not session.pending_creator_options:
@@ -433,8 +374,8 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
     
     # Show simple loading message
     await query.edit_message_text(
-        f"✅ Selected: {creator_name}\n"
-        f"🔄 Loading content..."
+        f"⏳ Loading {creator_name}'s content...\n\n"
+        f"Getting everything ready for you 🔥"
     )
     
     # Add creator to CSV (silently)
@@ -500,25 +441,10 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
         has_onlyfans = social_links.get('onlyfans') is not None
         directory_text = format_directory_text(creator_name, content_directory, session.filters)
         
-        # Create keyboard
-        keyboard = []
-        
-        if total_pictures > 0:
-            keyboard.append([InlineKeyboardButton(f"🖼️ View Pictures ({total_pictures})", callback_data="view_pictures")])
-        
-        if total_videos > 0:
-            keyboard.append([InlineKeyboardButton(f"🎬 View Videos ({total_videos})", callback_data="view_videos")])
-        
-        # Add Onlyfans Feed button if OnlyFans link is available
-        if has_onlyfans:
-            keyboard.append([InlineKeyboardButton("📱 Onlyfans Feed", callback_data="view_of_feed")])
-        
-        if has_more_pages:
-            keyboard.append([InlineKeyboardButton("⬇️ Load More Content", callback_data="load_more_pages")])
-        
-        keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Create modern keyboard using helper function
+        reply_markup = create_content_directory_keyboard(
+            total_pictures, total_videos, has_onlyfans, has_more_pages
+        )
         
         await send_message_with_retry(
             query.message.reply_text,
@@ -544,8 +470,6 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
             "Please try again later."
         )
 
-
-
 async def handle_confirm_search(query, session, data: str, bot_instance) -> None:
     """Handle confirmation of fuzzy match."""
     creator_name = data.split("|")[1]
@@ -561,7 +485,6 @@ async def handle_confirm_search(query, session, data: str, bot_instance) -> None
         except (TimedOut, NetworkError, BadRequest):
             pass
         session.pending_content = None
-
 
 async def display_content_directory_from_callback(query, session, content_directory: dict, creator_name: str) -> None:
     """Display the content directory from a callback query."""
@@ -604,7 +527,6 @@ async def display_content_directory_from_callback(query, session, content_direct
         )
     except (TimedOut, NetworkError) as e:
         logger.error(f"Failed to display content directory from callback: {e}")
-
 
 async def handle_load_more_pages(query, session, bot_instance) -> None:
     """Handle loading more content for the current creator."""
@@ -684,13 +606,11 @@ async def handle_load_more_pages(query, session, bot_instance) -> None:
         logger.error(f"Error loading more content: {e}")
         await query.edit_message_text("❌ An error occurred while loading more content.")
 
-
 async def handle_set_filters(query, session) -> None:
     """Show the filters configuration menu."""
     filter_text = format_filter_settings_text(session.filters)
     reply_markup = create_filters_menu_keyboard()
     await query.edit_message_text(filter_text, reply_markup=reply_markup)
-
 
 async def handle_content_details(query, session, data: str) -> None:
     """Show detailed information about a specific content item."""
@@ -706,13 +626,11 @@ async def handle_content_details(query, session, data: str) -> None:
     
     await query.edit_message_text(details_text, reply_markup=reply_markup)
 
-
 async def handle_page_change(query, session, data: str, bot_instance) -> None:
     """Update the content list to show a different page."""
     page = int(data.split("_")[1])
     session.current_page = page
     await handle_back_to_list(query, session)
-
 
 async def handle_filter_menu(query, session, data: str) -> None:
     """Handle filter option selection."""
@@ -727,7 +645,6 @@ async def handle_filter_menu(query, session, data: str) -> None:
     if text:
         await query.edit_message_text(text, reply_markup=reply_markup)
 
-
 async def handle_apply_filter(query, session, data: str) -> None:
     """Apply a specific filter setting."""
     parts = data.split("_")
@@ -741,7 +658,6 @@ async def handle_apply_filter(query, session, data: str) -> None:
             f"✅ Filter updated!\n\n{filter_type.replace('_', ' ').title()}: {value.title()}\n\n"
             "Filter has been applied. Your next search will use these settings."
         )
-
 
 async def handle_download_request(query, session, data: str, bot_instance) -> None:
     """Handle download link request for content."""
@@ -770,14 +686,14 @@ async def handle_download_request(query, session, data: str, bot_instance) -> No
 📄 Content: {title}
 🎬 Type: {item.get('type', 'Unknown')}
 
-🔗 **Download URL:**
-`{download_link}`
+🔗 Download URL:
+{download_link}
 
-⚠️ **Important:**
+⚠️ Important:
 • Right-click → Save As to download
 • Some links may require opening in browser
 
-💡 **Tip:** Copy the link above to access the content.
+💡 Tip: Copy the link above to access the content.
             """
             
             keyboard = [
@@ -786,14 +702,13 @@ async def handle_download_request(query, session, data: str, bot_instance) -> No
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(link_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await query.edit_message_text(link_text, reply_markup=reply_markup)
         else:
             await query.edit_message_text("❌ Failed to generate download link. Please try again later.")
             
     except Exception as e:
         logger.error(f"Error generating download link: {e}")
         await query.edit_message_text("❌ An error occurred while generating the download link.")
-
 
 async def handle_preview_request(query, session, data: str, bot_instance) -> None:
     """Handle preview request for content."""
@@ -818,13 +733,13 @@ async def handle_preview_request(query, session, data: str, bot_instance) -> Non
 📄 {item.get('title', 'Untitled')}
 🎬 {item.get('type', 'Unknown')} | {item.get('size', 'Unknown')}
 
-🖼️ **Preview URL:**
-`{preview_info.get('preview_url', 'Not available')}`
+🖼️ Preview URL:
+{preview_info.get('preview_url', 'Not available')}
 
-📷 **Thumbnail:**
-`{preview_info.get('thumbnail_url', 'Not available')}`
+📷 Thumbnail:
+{preview_info.get('thumbnail_url', 'Not available')}
 
-💡 **Note:** These are placeholder preview URLs. In the final version, you'll see actual previews.
+💡 Note: These are placeholder preview URLs. In the final version, you'll see actual previews.
             """
             
             keyboard = [
@@ -833,14 +748,13 @@ async def handle_preview_request(query, session, data: str, bot_instance) -> Non
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(preview_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await query.edit_message_text(preview_text, reply_markup=reply_markup)
         else:
             await query.edit_message_text("❌ Preview not available for this content.")
             
     except Exception as e:
         logger.error(f"Error generating preview: {e}")
         await query.edit_message_text("❌ An error occurred while generating the preview.")
-
 
 async def handle_back_to_list(query, session) -> None:
     """Return to the content list view."""
@@ -879,7 +793,6 @@ async def handle_back_to_list(query, session) -> None:
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(directory_text, reply_markup=reply_markup)
-
 
 async def handle_view_pictures(query, session, page: int = 0) -> None:
     """Show preview pictures list."""
@@ -944,12 +857,11 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
             domain = item.get('domain', 'Unknown')
             
             message_text = f"""
-🖼️ **Picture #{idx + 1}**
+🖼️ Picture #{idx + 1}
 
 🔗 Click link below to view full image:
 {image_url}
 
-💡 Tip: Telegram shows a preview thumbnail. Click to open the full image.
             """
             
             # Store for caching
@@ -987,23 +899,22 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
     
     # Send navigation message
     nav_text = f"""
-📷 Showing pictures {start_idx + 1}-{min(end_idx, len(preview_images))} of {len(preview_images)}
-📄 Page {page + 1} of {total_pages}
 
-💡 Tip: Each image shows a preview thumbnail. Click the link to view full size.
+  🖼️ Photo Gallery �️  
 
-Use the buttons below to navigate:
+📊 Showing: {start_idx + 1}-{min(end_idx, len(preview_images))} of {len(preview_images)}
+📄 Page: {page + 1} / {total_pages}
+
+💡 Tap links to view full-size images
     """
     
     reply_markup = create_picture_navigation_keyboard(page, total_pages, end_idx, len(preview_images))
     await query.message.reply_text(nav_text, reply_markup=reply_markup)
 
-
 async def handle_picture_page(query, session, data: str) -> None:
     """Handle picture page navigation."""
     page = int(data.split("_")[2])
     await handle_view_pictures(query, session, page)
-
 
 async def handle_picture_skip_menu(query, session, data: str) -> None:
     """Show smart menu to skip to a specific page in one step."""
@@ -1022,13 +933,13 @@ async def handle_picture_skip_menu(query, session, data: str) -> None:
     total_pages = (len(preview_images) + items_per_page - 1) // items_per_page
     
     skip_text = f"""
-⏩ **Jump to Page**
+⏩ Quick Jump ⏩
 
-📊 Total: {len(preview_images)} pictures
-📄 Pages: {total_pages} (10 pictures per page)
-📍 Currently on: Page {current_page + 1}
+Total: {len(preview_images)} pictures
+Pages: {total_pages} (10 per page)
+Current: Page {current_page + 1}
 
-Select a page to jump to:
+Select the page you want to jump to 👇
     """
     
     keyboard = []
@@ -1136,12 +1047,10 @@ Select a page to jump to:
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(skip_text, reply_markup=reply_markup, parse_mode='Markdown')
 
-
 async def handle_picture_cancel(query, session, data: str) -> None:
     """Cancel picture skip and return to navigation without resending pictures."""
     current_page = int(data.split("_")[2])
     await show_pictures_navigation(query, session, current_page)
-
 
 async def show_pictures_navigation(query, session, page: int) -> None:
     """Show only the navigation menu without re-sending pictures."""
@@ -1162,23 +1071,22 @@ async def show_pictures_navigation(query, session, page: int) -> None:
     
     # Just show navigation message
     nav_text = f"""
-📷 Showing pictures {start_idx + 1}-{end_idx} of {len(preview_images)}
-📄 Page {page + 1} of {total_pages}
 
-💡 Tip: Each image shows a preview thumbnail. Click the link to view full size.
+  🖼️ Photo Gallery 🖼️  
 
-Use the buttons below to navigate:
+� Showing: {start_idx + 1}-{end_idx} of {len(preview_images)}
+📄 Page: {page + 1} / {total_pages}
+
+💡 Use navigation buttons below
     """
     
     reply_markup = create_picture_navigation_keyboard(page, total_pages, end_idx, len(preview_images))
     await query.edit_message_text(nav_text, reply_markup=reply_markup)
 
-
 async def handle_picture_goto(query, session, data: str) -> None:
     """Go to specific picture page."""
     page = int(data.split("_")[2])
     await handle_view_pictures(query, session, page)
-
 
 async def handle_picture_details(query, session, data: str) -> None:
     """Show picture details."""
@@ -1211,9 +1119,8 @@ Click the button below to get the direct link.
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(details_text, reply_markup=reply_markup)
 
-
 async def handle_picture_link(query, session, data: str) -> None:
-    """Show picture direct link."""
+    """Show picture landing page link."""
     picture_idx = int(data.split("_")[2])
     
     if not session.current_directory:
@@ -1226,15 +1133,29 @@ async def handle_picture_link(query, session, data: str) -> None:
         return
     
     picture = preview_images[picture_idx]
-    image_url = picture.get('url', '')
+    original_url = picture.get('url', '')
+    creator_name = session.current_creator or 'Unknown Creator'
+    
+    # Import landing service
+    from landing_service import landing_service
+    
+    # Generate landing page URL
+    landing_url = await landing_service.generate_landing_url_async(
+        creator_name=creator_name,
+        content_title=picture.get('title', f'Picture #{picture_idx + 1}'),
+        content_type=picture.get('type', '🖼️ Picture'),
+        original_url=original_url,
+        preview_url=original_url,  # Use the image itself as preview
+        thumbnail_url=original_url
+    )
     
     link_text = f"""
 🖼️ Picture #{picture_idx + 1}
 
-🔗 **Image URL:**
-`{image_url}`
+🔗 Access Link:
+{landing_url}
 
-💡 **Tip:** Copy the link above or right-click → Open in new tab to view the image.
+💡 Click the link above to view the image with preview and access options.
     """
     
     keyboard = [
@@ -1243,8 +1164,7 @@ async def handle_picture_link(query, session, data: str) -> None:
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(link_text, reply_markup=reply_markup, parse_mode='Markdown')
-
+    await query.edit_message_text(link_text, reply_markup=reply_markup)
 
 async def handle_view_videos(query, session, page: int = 0) -> None:
     """Show video links list."""
@@ -1304,15 +1224,29 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
         message_tasks = []
         
         for idx, item in enumerate(page_items, start=start_idx):
-            video_url = item.get('url', '')
+            original_url = item.get('url', '')
             title = item.get('title', f'Video #{idx + 1}')
             domain = item.get('domain', 'Unknown')
+            creator_name = session.current_creator or 'Unknown Creator'
+            
+            # Import landing service
+            from landing_service import landing_service
+            
+            # Generate landing page URL
+            landing_url = await landing_service.generate_landing_url_async(
+                creator_name=creator_name,
+                content_title=title,
+                content_type=item.get('type', '🎬 Video'),
+                original_url=original_url,
+                preview_url=None,  # Videos don't have preview URLs typically
+                thumbnail_url=None
+            )
             
             message_text = f"""🎬 {title}
 
-🔗 Link: {video_url}
+🔗 Access Link: {landing_url}
 
-💡 Click the link above to view or download the video."""
+💡 Click the link above to view the video with preview and access options."""
             
             # Store for caching
             messages_to_cache.append({
@@ -1347,21 +1281,21 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
     
     # Send navigation message
     nav_text = f"""
-🎬 Showing videos {start_idx + 1}-{min(end_idx, len(video_links))} of {len(video_links)}
-📄 Page {page + 1} of {total_pages}
+🎬 Video Library 🎬
 
-Use the buttons below to navigate:
+Showing {start_idx + 1}-{min(end_idx, len(video_links))} of {len(video_links)} videos
+Page {page + 1} of {total_pages}
+
+Tap any link above to stream or download 🔥
     """
     
     reply_markup = create_video_navigation_keyboard(page, total_pages, end_idx, len(video_links))
     await query.message.reply_text(nav_text, reply_markup=reply_markup)
 
-
 async def handle_video_page(query, session, data: str) -> None:
     """Handle video page navigation."""
     page = int(data.split("_")[2])
     await handle_view_videos(query, session, page)
-
 
 async def handle_video_skip_menu(query, session, data: str) -> None:
     """Show smart menu to skip to a specific page in one step for videos."""
@@ -1380,13 +1314,13 @@ async def handle_video_skip_menu(query, session, data: str) -> None:
     total_pages = (len(video_links) + items_per_page - 1) // items_per_page
     
     skip_text = f"""
-⏩ **Jump to Page**
+⏩ Quick Jump ⏩
 
-📊 Total: {len(video_links)} videos
-📄 Pages: {total_pages} (10 videos per page)
-📍 Currently on: Page {current_page + 1}
+Total: {len(video_links)} videos
+Pages: {total_pages} (10 per page)
+Current: Page {current_page + 1}
 
-Select a page to jump to:
+Select the page you want to jump to 👇
     """
     
     keyboard = []
@@ -1494,12 +1428,10 @@ Select a page to jump to:
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(skip_text, reply_markup=reply_markup, parse_mode='Markdown')
 
-
 async def handle_video_cancel(query, session, data: str) -> None:
     """Cancel video skip and return to navigation without resending videos."""
     current_page = int(data.split("_")[2])
     await show_videos_navigation(query, session, current_page)
-
 
 async def show_videos_navigation(query, session, page: int) -> None:
     """Show only the navigation menu without re-sending videos."""
@@ -1520,21 +1452,21 @@ async def show_videos_navigation(query, session, page: int) -> None:
     
     # Just show navigation message
     nav_text = f"""
-🎬 Showing videos {start_idx + 1}-{end_idx} of {len(video_links)}
-📄 Page {page + 1} of {total_pages}
+🎬 Video Library 🎬
 
-Use the buttons below to navigate:
+Showing {start_idx + 1}-{end_idx} of {len(video_links)} videos
+Page {page + 1} of {total_pages}
+
+Use the navigation buttons below 👇
     """
     
     reply_markup = create_video_navigation_keyboard(page, total_pages, end_idx, len(video_links))
     await query.edit_message_text(nav_text, reply_markup=reply_markup)
 
-
 async def handle_video_goto(query, session, data: str) -> None:
     """Go to specific video page."""
     page = int(data.split("_")[2])
     await handle_view_videos(query, session, page)
-
 
 async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> None:
     """Show OnlyFans feed posts from Coomer API."""
@@ -1562,11 +1494,12 @@ async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> No
     
     username = username_match.group(1)
     
-    # Check cache first
-    _clean_onlyfans_cache()
-    if username in _onlyfans_feed_cache:
+    # Check cache first (using database)
+    cached_posts = bot_instance.cache_manager.get_onlyfans_posts(username, max_age_hours=24)
+    
+    if cached_posts:
         logger.info(f"✓ OnlyFans feed cache hit for {username}")
-        posts = _onlyfans_feed_cache[username]['data']
+        posts = cached_posts
         
         # Update message to show it's from cache
         await query.edit_message_text(f"✓ Loaded archived Onlyfans Feed for @{username} (cached)")
@@ -1628,12 +1561,12 @@ async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> No
                 if response.status_code == 403:
                     # Try alternative approach: provide direct link and explain
                     await query.edit_message_text(
-                        f"⚠️ **Access Currently Unavailable**\n\n"
+                        f"⚠️ Access Currently Unavailable\n\n"
                         f"The archive database is currently blocking automated requests for @{username}.\n\n"
-                        f"**View Feed Manually:**\n"
+                        f"View Feed Manually:\n"
                         f"You can browse the archived OnlyFans feed directly by opening this link in your browser:\n\n"
                         f"🔗 `https://coomer.st/onlyfans/user/{username}`\n\n"
-                        f"💡 **Note:** The link provides access to all archived posts, photos, and videos from this creator's OnlyFans.",
+                        f"💡 Note: The link provides access to all archived posts, photos, and videos from this creator's OnlyFans.",
                         parse_mode='Markdown',
                         disable_web_page_preview=False
                     )
@@ -1648,14 +1581,11 @@ async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> No
                 
                 posts = response.json()
                 
-                # Cache the posts
-                _onlyfans_feed_cache[username] = {
-                    'data': posts,
-                    'timestamp': datetime.now()
-                }
-                logger.info(f"✓ Cached OnlyFans feed for {username} (cache size: {len(_onlyfans_feed_cache)})")
+                # Cache the posts in database
+                bot_instance.cache_manager.save_onlyfans_posts(username, posts)
+                logger.info(f"✓ Cached OnlyFans feed for {username} in database")
                 
-                # Save to coomer.json for reference
+                # Also save to coomer.json for reference
                 with open('coomer.json', 'w', encoding='utf-8') as f:
                     json.dump(posts, f, indent=2, ensure_ascii=False)
             
@@ -1681,7 +1611,6 @@ async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> No
     # Display posts
     await display_of_feed_page(query, session, page)
 
-
 async def display_of_feed_page(query, session, page: int) -> None:
     """Display a page of Onlyfans Feed posts with clickable links."""
     posts = session.of_feed_posts
@@ -1703,10 +1632,13 @@ async def display_of_feed_page(query, session, page: int) -> None:
     from datetime import datetime
     import httpx
     
-    header_text = f"📱 **Onlyfans Feed: @{username}**\n\n"
-    header_text += f"📄 Showing posts {start_idx + 1}-{end_idx} of {len(posts)}\n"
-    header_text += f"📖 Page {page + 1} of {total_pages}\n\n"
-    header_text += "Loading media..."
+    header_text = f"\n"
+    header_text += f"  📱 OnlyFans Feed 📱  \n"
+    header_text += f"\n\n"
+    header_text += f"Creator: @{username}\n\n"
+    header_text += f"� Showing: {start_idx + 1}-{end_idx} of {len(posts)}\n"
+    header_text += f"� Page: {page + 1} / {total_pages}\n\n"
+    header_text += "⏳ Loading media..."
     
     # Delete the old message and send new header
     try:
@@ -1735,13 +1667,6 @@ async def display_of_feed_page(query, session, page: int) -> None:
         """Fetch and process a single post."""
         try:
             post_id = post.get('id', '')
-            
-            # Check cache first
-            _clean_onlyfans_cache()
-            post_cache_key = f"{username}:{post_id}"
-            if post_cache_key in _onlyfans_post_cache:
-                logger.debug(f"✓ Post cache hit for {post_id}")
-                return _onlyfans_post_cache[post_cache_key]['data']
             
             # Fetch detailed post data to get media URLs
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -1772,7 +1697,7 @@ async def display_of_feed_page(query, session, page: int) -> None:
                 
                 # Escape markdown special characters
                 def escape_text(text):
-                    for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
+                    for char in ['_', '', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
                         text = text.replace(char, '')
                     return text
                 
@@ -1827,13 +1752,6 @@ async def display_of_feed_page(query, session, page: int) -> None:
                 
                 result = (caption, media_items)
                 
-                # Cache the result
-                _onlyfans_post_cache[post_cache_key] = {
-                    'data': result,
-                    'timestamp': datetime.now()
-                }
-                logger.debug(f"✓ Cached post {post_id}")
-                
                 return result
         
         except Exception as e:
@@ -1855,7 +1773,7 @@ async def display_of_feed_page(query, session, page: int) -> None:
         ]
         
         # Fetch batch concurrently
-        batch_results = await asyncio.gather(*tasks)
+        batch_results = await asyncio.gather(tasks)
         all_post_data.extend(batch_results)
         
         # Reduced delay between batches from 0.5s to 0.2s
@@ -1928,7 +1846,6 @@ async def display_of_feed_page(query, session, page: int) -> None:
     
     await query.message.reply_text(nav_text, reply_markup=reply_markup)
 
-
 async def handle_of_feed_page(query, session, data: str, bot_instance) -> None:
     """Handle Onlyfans Feed page navigation."""
     page = int(data.split("_")[3])
@@ -1938,7 +1855,6 @@ async def handle_of_feed_page(query, session, data: str, bot_instance) -> None:
         return
     
     await display_of_feed_page(query, session, page)
-
 
 async def handle_of_feed_skip_menu(query, session, data: str) -> None:
     """Show smart menu to skip to a specific page in Onlyfans Feed."""
@@ -1954,13 +1870,14 @@ async def handle_of_feed_skip_menu(query, session, data: str) -> None:
     total_pages = (len(posts) + items_per_page - 1) // items_per_page
     
     skip_text = f"""
-⏩ **Jump to Page**
+
+  ⏩ Quick Jump ⏩  
 
 📊 Total: {len(posts)} posts
-📄 Pages: {total_pages} (5 posts per page)
-📍 Currently on: Page {current_page + 1}
+📄 Pages: {total_pages} (5 per page)
+📍 Current: Page {current_page + 1}
 
-Select a page to jump to:
+Select page to jump to
     """
     
     keyboard = []
@@ -2068,18 +1985,15 @@ Select a page to jump to:
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(skip_text, reply_markup=reply_markup, parse_mode='Markdown')
 
-
 async def handle_of_feed_goto(query, session, data: str, bot_instance) -> None:
     """Go to specific Onlyfans Feed page."""
     page = int(data.split("_")[3])
     await display_of_feed_page(query, session, page)
 
-
 async def handle_of_feed_cancel(query, session, data: str) -> None:
     """Cancel Onlyfans Feed skip and return to navigation."""
     current_page = int(data.split("_")[3])
     await show_of_feed_navigation(query, session, current_page)
-
 
 async def show_of_feed_navigation(query, session, page: int) -> None:
     """Show only the navigation menu for Onlyfans Feed without re-sending posts."""
@@ -2116,5 +2030,4 @@ async def show_of_feed_navigation(query, session, page: int) -> None:
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(nav_text, reply_markup=reply_markup)
-
 

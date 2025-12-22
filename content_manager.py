@@ -7,13 +7,16 @@ from typing import Dict, List, Optional
 import logging
 from datetime import datetime, timedelta
 from content_scraper import SimpleCityScraper
+from cache_manager import CacheManager
+from landing_service import landing_service
 
 logger = logging.getLogger(__name__)
 
 class ContentManager:
-    def __init__(self):
+    def __init__(self, cache_manager: Optional[CacheManager] = None):
         self.cache = {}
         self.scraper = SimpleCityScraper()
+        self.cache_manager = cache_manager or CacheManager()
         self.search_providers = []  # Will be populated with search providers later
     
     async def search_creator_options(self, creator_name: str) -> Optional[Dict]:
@@ -27,28 +30,52 @@ class ContentManager:
         """
         return await self.scraper.search_creator_options(creator_name)
     
-    async def search_creator_content(self, creator_name: str, filters: Dict, max_pages: int = 3, start_page: int = 1, direct_url: Optional[str] = None) -> Optional[Dict]:
+    async def search_creator_content(self, creator_name: str, filters: Dict, max_pages: int = 3, start_page: int = 1, direct_url: Optional[str] = None, cache_only: bool = True) -> Optional[Dict]:
         """
-        Search for creator content with applied filters using real scraper.
+        Search for creator content with applied filters.
         
         Args:
             creator_name: Name of the creator to search for
             filters: Filters to apply to content
-            max_pages: Maximum number of pages to scrape (default 20)
-            start_page: Starting page number (default 1, for fetching additional pages)
-            direct_url: Direct URL to scrape (bypasses CSV search, for pre-selected creators)
+            max_pages: Maximum number of pages to scrape (default 3) - only used if cache_only=False
+            start_page: Starting page number (default 1) - only used if cache_only=False
+            direct_url: Direct URL to scrape - only used if cache_only=False
+            cache_only: If True (default), only return cached data, no external requests
         """
         try:
-            # Check cache first (only for initial requests, not for additional pages)
-            cache_key = f"{creator_name}_{filters.get('content_type', 'all')}"
-            if start_page == 1 and direct_url is None and cache_key in self.cache:
-                cache_entry = self.cache[cache_key]
-                # Use cache if less than 1 hour old
-                if (datetime.now() - cache_entry['timestamp']).seconds < 3600:
-                    logger.info(f"Returning cached content for: {creator_name}")
-                    return cache_entry['data']
+            # Always check persistent cache first
+            cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24)
+            if cached_result:
+                logger.info(f"✓ Using cached content for: {creator_name}")
+                # Apply filters to cached content
+                filtered_result = self._apply_filters_to_result(cached_result, filters)
+                return filtered_result
             
-            # Use real scraper to get content
+            # If cache_only mode, don't fetch externally
+            if cache_only:
+                logger.info(f"⚠️  No cached content for: {creator_name} (cache-only mode, not fetching)")
+                return {
+                    'creator': creator_name,
+                    'similarity': 0.0,
+                    'needs_confirmation': False,
+                    'last_updated': None,
+                    'total_items': 0,
+                    'items': [],
+                    'preview_images': [],
+                    'total_preview_images': 0,
+                    'video_links': [],
+                    'total_video_links': 0,
+                    'pages_scraped': 0,
+                    'total_pages': 0,
+                    'start_page': 1,
+                    'end_page': 0,
+                    'has_more_pages': False,
+                    'social_links': {},
+                    'from_cache': False,
+                    'cache_miss': True
+                }
+            
+            # Fallback: Use real scraper to get content (only if cache_only=False)
             logger.info(f"Fetching content for creator: {creator_name}, pages {start_page}-{start_page + max_pages - 1}")
             scrape_result = await self.scraper.scrape_creator_content(creator_name, max_pages=max_pages, start_page=start_page, direct_url=direct_url)
             
@@ -134,13 +161,6 @@ class ContentManager:
                 'has_more_pages': scrape_result['has_more_pages'],
                 'social_links': scrape_result.get('social_links', {})  # Pass through social links
             }
-            
-            # Cache the result (only for initial requests)
-            if start_page == 1:
-                self.cache[cache_key] = {
-                    'timestamp': datetime.now(),
-                    'data': result
-                }
             
             logger.info(f"Found {len(content_items)} items for creator: {creator_name}")
             return result
@@ -307,15 +327,48 @@ class ContentManager:
     async def get_content_download_link(self, creator_name: str, content_idx: int) -> Optional[str]:
         """
         Get download link for specific content.
-        Returns the actual URL from the scraped content.
+        Now returns a landing page URL instead of direct content URL.
         """
         try:
-            # Look for the content in cache
+            # Look for the content in session cache first
             for cache_key, cache_entry in self.cache.items():
                 if cache_key.startswith(creator_name):
                     items = cache_entry['data'].get('items', [])
                     if 0 <= content_idx < len(items):
-                        return items[content_idx].get('url')
+                        item = items[content_idx]
+                        original_url = item.get('url')
+                        
+                        if original_url:
+                            # Generate landing page URL
+                            landing_url = await landing_service.generate_landing_url_async(
+                                creator_name=creator_name,
+                                content_title=item.get('title', 'Untitled Content'),
+                                content_type=item.get('type', 'Content'),
+                                original_url=original_url,
+                                preview_url=item.get('preview_url'),
+                                thumbnail_url=item.get('thumbnail_url')
+                            )
+                            return landing_url
+            
+            # Try to get from persistent cache
+            cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24)
+            if cached_result:
+                items = cached_result.get('items', [])
+                if 0 <= content_idx < len(items):
+                    item = items[content_idx]
+                    original_url = item.get('url')
+                    
+                    if original_url:
+                        # Generate landing page URL
+                        landing_url = await landing_service.generate_landing_url_async(
+                            creator_name=creator_name,
+                            content_title=item.get('title', 'Untitled Content'),
+                            content_type=item.get('type', 'Content'),
+                            original_url=original_url,
+                            preview_url=item.get('preview_url'),
+                            thumbnail_url=item.get('thumbnail_url')
+                        )
+                        return landing_url
             
             logger.warning(f"Content not found in cache: {creator_name} idx {content_idx}")
             return None
@@ -342,6 +395,22 @@ class ContentManager:
         except Exception as e:
             logger.error(f"Error generating preview: {e}")
             return None
+    
+    def _apply_filters_to_result(self, result: Dict, filters: Dict) -> Dict:
+        """Apply filters to a cached result."""
+        # Filter items based on content type
+        filtered_items = [
+            item for item in result.get('items', [])
+            if self._matches_filters(item, filters)
+        ]
+        
+        # Create a copy of the result with filtered items
+        filtered_result = result.copy()
+        filtered_result['items'] = filtered_items
+        filtered_result['total_items'] = len(filtered_items)
+        
+        return filtered_result
+
     
     def clear_cache(self):
         """Clear the content cache."""

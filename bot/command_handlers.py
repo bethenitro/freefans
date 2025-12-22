@@ -14,43 +14,49 @@ from user_session import UserSession
 logger = logging.getLogger(__name__)
 
 WELCOME_TEXT = """
-🎉 Welcome to FreeFans Bot! 🎉
+🔥 Welcome to FreeFans Bot 🔥
 
-I can help you discover content from your favorite creators.
+Your personal gateway to exclusive creator content
 
-🔍 How to use:
-• Send me a creator's name to search for content
-• Use filters to narrow down your search
-• Browse through organized content directories
-• Get direct links to content you want
+What I can do for you:
 
-Type a creator's name to get started!
+🔍 Search any creator instantly
+🖼️ Browse hot photo galleries
+🎬 Stream premium videos
+📱 Access OnlyFans archives
+💾 Download everything you want
+
+💋 Just send me a creator's name and let's get started!
 """
 
 HELP_TEXT = """
-📖 FreeFans Bot Help
+� FreeFans Bot Help �
 
-🔍 Searching for Content:
-• Simply type a creator's name
-• The bot will search and return organized content
+� How to Find What You Want
 
-🏷️ Content Filters:
-• Content Type: Photos, Videos, All
-• Date Range: Recent, This Week, This Month, All Time
-• Quality: HD, Standard, Any
+Type any creator's name and I'll find their hottest content. The search is smart - even partial names work!
 
-📁 Content Directory Structure:
-• Content is organized by upload date
-• Each item shows preview info
-• Click to get direct download link
+� What You Get Access To
 
-💡 Commands:
-/start - Start the bot
-/help - Show this help message
-/filters - Set content filters
-/clear - Clear search history
+🖼️ Photos - High-res galleries, full albums
+🎬 Videos - Stream or download premium clips  
+📱 OnlyFans Archives - Complete feed history
+💎 Exclusive Content - Hard to find anywhere else
 
-Need help? Contact support!
+⚙️ Customize Your Experience
+
+Use filters to find exactly what you're looking for:
+📁 Photos only, videos only, or everything
+📅 Recent uploads or all-time favorites
+🎬 HD quality or any resolution
+
+⚡ Quick Commands
+
+/start - Get started with the bot
+/help - Show this guide again
+/filters - Set up your preferences
+
+Ready to explore? Just send me a creator's name! 😈
 """
 
 

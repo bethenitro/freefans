@@ -637,3 +637,41 @@ async def search_csv_with_rapidfuzz(creator_name: str, csv_path: str = 'onlyfans
         logger.error(f"Error in rapidfuzz CSV search: {e}")
         # Fallback to standard search
         return await search_multiple_models_in_csv_parallel(creator_name, csv_path, max_results)
+
+
+def get_all_creators_from_csv(csv_path: str = 'onlyfans_models.csv', max_results: Optional[int] = None) -> List[dict]:
+    """
+    Get all creators from CSV file.
+    
+    Args:
+        csv_path: Path to the CSV file
+        max_results: Maximum number of results to return (None for all)
+        
+    Returns:
+        List of dicts with 'name' and 'url' keys
+    """
+    try:
+        csv_data = _load_csv_to_memory(csv_path)
+        
+        if not csv_data:
+            logger.warning("CSV data is empty")
+            return []
+        
+        results = []
+        for row in csv_data:
+            # Support both naming conventions: 'Name'/'Profile Link' and 'model_name'/'profile_link'
+            name = row.get('Name', row.get('model_name', '')).strip()
+            url = row.get('Profile Link', row.get('profile_link', '')).strip()
+            
+            if name and url:
+                results.append({'name': name, 'url': url})
+            
+            if max_results and len(results) >= max_results:
+                break
+        
+        logger.info(f"Retrieved {len(results)} creators from CSV")
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error getting all creators from CSV: {e}")
+        return []

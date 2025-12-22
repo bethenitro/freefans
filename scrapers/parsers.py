@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import functools
 import hashlib
 from datetime import datetime, timedelta
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +64,131 @@ def _get_cached_parse(html: str, cache_key: str):
 def _cache_parse_result(html: str, cache_key: str, data):
     """Cache parse result."""
     html_hash = _get_html_hash(html)
-    full_key = f"{cache_key}_{html_hash}"
+    full_key = f"{cache_key}_{hash}"
     _html_parse_cache[full_key] = {
         'data': data,
         'timestamp': datetime.now()
     }
     logger.debug(f"Cached {cache_key} (cache size: {len(_html_parse_cache)})")
+
+
+def is_valid_content_image(image_url: str, min_size_indicator: int = 300) -> bool:
+    """
+    Filter out logos, icons, and other non-content images.
+    Uses multiple heuristics for robust filtering without external API calls.
+    
+    Args:
+        image_url: The image URL to validate
+        min_size_indicator: Minimum dimension to consider as content (default 300px)
+    
+    Returns:
+        bool: True if likely a content image, False otherwise
+    """
+    url_lower = image_url.lower()
+    parsed = urlparse(image_url)
+    path = parsed.path.lower()
+    
+    # Keywords that indicate non-content images
+    exclude_keywords = [
+        'logo', 'icon', 'avatar', 'profile', 'banner', 'header',
+        'footer', 'badge', 'button', 'emoji', 'twemoji', 'smilie',
+        'reaction', 'favicon', 'thumbnail_small', 'thumb_', 
+        'preview_small', '_icon', '-icon', '_logo', '-logo',
+        'watermark', 'signature', 'brand'
+    ]
+    
+    # CDN domains known for serving UI elements
+    exclude_domains = [
+        'cdn.jsdelivr.net/gh/twitter/twemoji',
+        'twemoji.maxcdn.com',
+        'abs.twimg.com',
+        'emoji.discourse-cdn.com'
+    ]
+    
+    # 1. Check for excluded domains
+    for domain in exclude_domains:
+        if domain in url_lower:
+            logger.debug(f"Filtered out (excluded domain): {image_url[:100]}")
+            return False
+    
+    # 2. Check for excluded keywords in URL
+    if any(keyword in url_lower for keyword in exclude_keywords):
+        logger.debug(f"Filtered out (keyword match): {image_url[:100]}")
+        return False
+    
+    # 3. Check file extension (icons often use specific extensions)
+    if path.endswith('.ico'):
+        return False
+    
+    if path.endswith('.svg') or path.endswith('.webp'):
+        # SVG and WebP CAN be content, but check size indicators
+        size_match = re.search(r'(\d+)x(\d+)', url_lower)
+        if size_match:
+            width = int(size_match.group(1))
+            height = int(size_match.group(2))
+            # Icons are typically < 300x300
+            if width < min_size_indicator and height < min_size_indicator:
+                logger.debug(f"Filtered out (small SVG/WebP {width}x{height}): {image_url[:100]}")
+                return False
+    
+    # 4. Check for small dimensions in URL path
+    # Common patterns: /72x72/, /icon_128x128, thumbnail_50x50, etc.
+    small_size_patterns = [
+        r'/(\d{1,3})x(\d{1,3})/',  # /72x72/
+        r'_(\d{1,3})x(\d{1,3})[._]',  # _72x72.png or _72x72_
+        r'-(\d{1,3})x(\d{1,3})[._-]',  # -72x72.png
+    ]
+    
+    for pattern in small_size_patterns:
+        match = re.search(pattern, path)
+        if match:
+            width = int(match.group(1))
+            height = int(match.group(2))
+            # Consider images smaller than min_size_indicator as likely icons/logos
+            if width < min_size_indicator and height < min_size_indicator:
+                logger.debug(f"Filtered out (small dimensions {width}x{height}): {image_url[:100]}")
+                return False
+    
+    # 5. Check for "thumb" or "thumbnail" with small size indicator
+    if ('thumb' in url_lower or 'thumbnail' in url_lower):
+        # If it's explicitly marked as thumbnail AND has small dimensions
+        size_match = re.search(r'(\d{2,4})', path)
+        if size_match and int(size_match.group(1)) < min_size_indicator:
+            logger.debug(f"Filtered out (thumbnail): {image_url[:100]}")
+            return False
+    
+    # 6. Check for CDN optimization parameters that indicate small images
+    # e.g., ?w=72, ?width=100, ?size=small
+    query = parsed.query.lower()
+    if query:
+        size_params = re.findall(r'(?:w|width|size|s)=(\d+)', query)
+        if size_params:
+            for size in size_params:
+                if int(size) < min_size_indicator:
+                    logger.debug(f"Filtered out (small query param): {image_url[:100]}")
+                    return False
+        
+        # Check for explicit "small" or "icon" size parameters
+        if any(param in query for param in ['size=small', 'size=icon', 'type=icon']):
+            logger.debug(f"Filtered out (icon/small param): {image_url[:100]}")
+            return False
+    
+    # 7. Check filename patterns
+    filename = path.split('/')[-1].lower()
+    
+    # Very short filenames are often icons (e.g., "icon.png", "logo.jpg")
+    if len(filename) < 10 and any(word in filename for word in ['icon', 'logo', 'btn']):
+        logger.debug(f"Filtered out (short icon filename): {image_url[:100]}")
+        return False
+    
+    # Emoji/Unicode pattern in filename
+    if re.search(r'[0-9a-f]{4,}(-[0-9a-f]{4,})+', filename):
+        # Pattern like: 1f9b8-200d-2642-fe0f.png (emoji code)
+        logger.debug(f"Filtered out (emoji pattern): {image_url[:100]}")
+        return False
+    
+    # 8. All checks passed - likely a content image
+    return True
 
 
 def load_video_domains(file_path: str = 'video_domains.txt') -> List[str]:
@@ -242,10 +362,11 @@ def extract_preview_images(html: str) -> List[Dict[str, str]]:
                         continue
                     seen_urls.add(img_url)
                     
-                    description = img.get('alt', '') or img.get('title', '')
-                    
-                    if 'avatar' in img_url.lower() or 'icon' in img_url.lower():
+                    # Apply robust filtering to exclude non-content images
+                    if not is_valid_content_image(img_url):
                         continue
+                    
+                    description = img.get('alt', '') or img.get('title', '')
                     
                     preview_images.append({
                         'url': img_url,
