@@ -11,3 +11,6 @@ content_domains.txt
 env/
 coomer.json
 logs.txt
+
+content_cache.db
+bunkr.html

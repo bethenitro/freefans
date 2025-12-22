@@ -6,6 +6,8 @@ Serves landing pages with content previews and ads before redirecting to origina
 import os
 import hashlib
 import base64
+import secrets
+import string
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from urllib.parse import quote, unquote
@@ -22,6 +24,9 @@ from decouple import config
 from cache_manager import CacheManager
 
 app = FastAPI(title="FreeFans Landing Server", version="1.0.0")
+
+# In-memory storage for short URLs (in production, use Redis or database)
+url_storage: Dict[str, Dict[str, Any]] = {}
 
 # Add CORS middleware for Cloudflare tunnel
 app.add_middleware(
@@ -42,6 +47,11 @@ cache_manager = CacheManager()
 # Secret key for URL signing (should be in .env)
 SECRET_KEY = config('LANDING_SECRET_KEY', default='your-secret-key-change-this')
 
+def generate_short_id(length: int = 8) -> str:
+    """Generate a short random ID for URLs"""
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
 class ContentLink(BaseModel):
     """Model for content link data"""
     creator_name: str
@@ -51,14 +61,18 @@ class ContentLink(BaseModel):
     preview_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     expires_at: datetime
+    short_id: Optional[str] = None  # Allow bot to provide its own short_id
 
 def generate_signed_url(content_data: Dict[str, Any], expires_hours: int = 24) -> str:
-    """Generate a signed URL for content access"""
+    """Generate a short signed URL for content access"""
     # Create expiration timestamp
     expires_at = datetime.now() + timedelta(hours=expires_hours)
     
-    # Prepare data to sign
-    data_to_sign = {
+    # Generate a short unique ID
+    short_id = generate_short_id(8)
+    
+    # Store the content data with the short ID
+    url_storage[short_id] = {
         'creator': content_data['creator_name'],
         'title': content_data['content_title'],
         'type': content_data['content_type'],
@@ -68,32 +82,21 @@ def generate_signed_url(content_data: Dict[str, Any], expires_hours: int = 24) -
         'expires': expires_at.isoformat()
     }
     
-    # Convert to string and encode
-    data_string = str(sorted(data_to_sign.items()))
-    signature = hashlib.sha256(f"{data_string}{SECRET_KEY}".encode()).hexdigest()
-    
-    # Encode the data
-    encoded_data = base64.urlsafe_b64encode(str(data_to_sign).encode()).decode()
-    
-    return f"/content/{encoded_data}/{signature}"
+    return f"/c/{short_id}"
 
-def verify_signed_url(encoded_data: str, signature: str) -> Optional[Dict[str, Any]]:
-    """Verify and decode a signed URL"""
+def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
+    """Verify and retrieve data for a short URL"""
     try:
-        # Decode the data
-        decoded_data = base64.urlsafe_b64decode(encoded_data.encode()).decode()
-        data_dict = eval(decoded_data)  # Note: In production, use json.loads with proper encoding
-        
-        # Verify signature
-        data_string = str(sorted(data_dict.items()))
-        expected_signature = hashlib.sha256(f"{data_string}{SECRET_KEY}".encode()).hexdigest()
-        
-        if signature != expected_signature:
+        # Get data from storage
+        data_dict = url_storage.get(short_id)
+        if not data_dict:
             return None
         
         # Check expiration
         expires_at = datetime.fromisoformat(data_dict['expires'])
         if datetime.now() > expires_at:
+            # Clean up expired link
+            del url_storage[short_id]
             return None
         
         return data_dict
@@ -106,16 +109,15 @@ async def home(request: Request):
     """Home page"""
     return templates.TemplateResponse("home.html", {"request": request})
 
-@app.get("/content/{encoded_data}/{signature}", response_class=HTMLResponse)
+@app.get("/c/{short_id}", response_class=HTMLResponse)
 async def content_landing(
     request: Request,
-    encoded_data: str,
-    signature: str
+    short_id: str
 ):
-    """Content landing page with preview and ads"""
+    """Content landing page with preview - now with short URLs"""
     
-    # Verify the signed URL
-    content_data = verify_signed_url(encoded_data, signature)
+    # Verify the short URL and get content data
+    content_data = verify_short_url(short_id)
     if not content_data:
         raise HTTPException(status_code=404, detail="Invalid or expired link")
     
@@ -131,15 +133,8 @@ async def content_landing(
     is_video = 'video' in content_type.lower() or '🎬' in content_type
     is_photo = 'photo' in content_type.lower() or '📷' in content_type or '🖼️' in content_type
     
-    # Generate access URL (another signed URL for the redirect)
-    access_data = {
-        'url': original_url,
-        'accessed_at': datetime.now().isoformat()
-    }
-    access_string = str(sorted(access_data.items()))
-    access_signature = hashlib.sha256(f"{access_string}{SECRET_KEY}".encode()).hexdigest()
-    access_encoded = base64.urlsafe_b64encode(str(access_data).encode()).decode()
-    access_url = f"/access/{access_encoded}/{access_signature}"
+    # Use preview or thumbnail for Open Graph
+    og_image = preview_url or thumbnail_url or ""
     
     return templates.TemplateResponse("content_landing.html", {
         "request": request,
@@ -150,67 +145,69 @@ async def content_landing(
         "is_photo": is_photo,
         "preview_url": preview_url,
         "thumbnail_url": thumbnail_url,
-        "access_url": access_url,
-        "original_domain": original_url.split('/')[2] if '://' in original_url else 'Unknown'
+        "original_url": original_url,
+        "og_image": og_image,
+        "og_title": f"{content_title} - {creator_name}",
+        "og_description": f"View {content_type} from {creator_name}"
     })
+
+# Keep old endpoint for backward compatibility
+@app.get("/content/{encoded_data}/{signature}", response_class=HTMLResponse)
+async def content_landing_legacy(
+    request: Request,
+    encoded_data: str,
+    signature: str
+):
+    """Legacy content landing page - redirects to home"""
+    raise HTTPException(status_code=404, detail="This link format is deprecated. Please request a new link.")
 
 @app.get("/access/{encoded_data}/{signature}")
 async def access_content(encoded_data: str, signature: str):
-    """Redirect to original content after showing landing page"""
-    
-    try:
-        # Decode and verify access data
-        decoded_data = base64.urlsafe_b64decode(encoded_data.encode()).decode()
-        access_data = eval(decoded_data)  # Note: In production, use json.loads
-        
-        # Verify signature
-        access_string = str(sorted(access_data.items()))
-        expected_signature = hashlib.sha256(f"{access_string}{SECRET_KEY}".encode()).hexdigest()
-        
-        if signature != expected_signature:
-            raise HTTPException(status_code=404, detail="Invalid access link")
-        
-        original_url = access_data['url']
-        
-        # Log the access (optional)
-        print(f"Content accessed: {original_url} at {access_data['accessed_at']}")
-        
-        # Redirect to original content
-        return RedirectResponse(url=original_url, status_code=302)
-        
-    except Exception as e:
-        raise HTTPException(status_code=404, detail="Invalid access link")
+    """Legacy access endpoint - deprecated"""
+    raise HTTPException(status_code=404, detail="This link format is deprecated.")
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.now().isoformat(),
+        "stored_urls": len(url_storage)
+    }
 
 # API endpoint for the bot to generate landing page URLs
 @app.post("/api/generate-link")
 async def generate_landing_link(content_data: ContentLink):
     """Generate a landing page URL for content"""
     
-    # Convert Pydantic model to dict
-    data_dict = {
-        'creator_name': content_data.creator_name,
-        'content_title': content_data.content_title,
-        'content_type': content_data.content_type,
-        'original_url': content_data.original_url,
-        'preview_url': content_data.preview_url,
-        'thumbnail_url': content_data.thumbnail_url
+    # Use provided short_id or generate a new one
+    short_id = content_data.short_id or generate_short_id(8)
+    
+    # Calculate expiration
+    if isinstance(content_data.expires_at, str):
+        expires_at = datetime.fromisoformat(content_data.expires_at)
+    else:
+        expires_at = content_data.expires_at
+    
+    # Store the content data with the short ID
+    url_storage[short_id] = {
+        'creator': content_data.creator_name,
+        'title': content_data.content_title,
+        'type': content_data.content_type,
+        'url': content_data.original_url,
+        'preview': content_data.preview_url,
+        'thumbnail': content_data.thumbnail_url,
+        'expires': expires_at.isoformat()
     }
     
-    # Generate signed URL
-    signed_url = generate_signed_url(data_dict)
-    
-    # Return full URL (you'll need to configure your domain)
+    # Return full URL
     base_url = config('LANDING_BASE_URL', default='http://localhost:8001')
-    full_url = f"{base_url}{signed_url}"
+    full_url = f"{base_url}/c/{short_id}"
     
     return {
         "landing_url": full_url,
-        "expires_at": content_data.expires_at.isoformat()
+        "short_id": short_id,
+        "expires_at": expires_at.isoformat()
     }
 
 if __name__ == "__main__":

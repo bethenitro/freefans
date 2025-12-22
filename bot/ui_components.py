@@ -48,11 +48,14 @@ def create_content_keyboard(items: list, page: int = 0, items_per_page: int = 5)
     for idx, item in enumerate(page_items, start=start_idx):
         title = item.get('title', f'Item {idx + 1}')
         
-        # Truncate title if too long for button
-        if len(title) > 45:
-            title = title[:42] + '...'
+        # Clean title to prevent entity parsing errors
+        clean_title = _clean_text_for_telegram(title)
         
-        button_text = f"{item.get('type', '📄')} {title}"
+        # Truncate title if too long for button
+        if len(clean_title) > 45:
+            clean_title = clean_title[:42] + '...'
+        
+        button_text = f"{item.get('type', '📄')} {clean_title}"
         callback_data = f"content_{idx}"
         keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
     
@@ -142,6 +145,9 @@ def format_directory_text(creator_name: str, content_directory: dict, filters: d
     has_more = content_directory.get('has_more_pages', False)
     social_links = content_directory.get('social_links', {})
     
+    # Clean creator name to prevent entity parsing errors
+    clean_creator_name = _clean_text_for_telegram(creator_name)
+    
     # Build social links section
     social_info = ""
     if social_links.get('onlyfans') or social_links.get('instagram'):
@@ -158,9 +164,9 @@ def format_directory_text(creator_name: str, content_directory: dict, filters: d
     
     return f"""
 
-  � Content Library  📂  
+  📂 Content Library  📂  
 
-👤 Creator: {creator_name}{social_info}
+👤 Creator: {clean_creator_name}{social_info}
 
   📊 Statistics  
 
@@ -171,17 +177,43 @@ def format_directory_text(creator_name: str, content_directory: dict, filters: d
 Select an option below to explore
     """
 
+
+def _clean_text_for_telegram(text: str) -> str:
+    """Clean text to prevent Telegram entity parsing errors."""
+    if not text:
+        return text
+    
+    import re
+    
+    # Remove any HTML tags
+    text = re.sub(r'<[^>]*>', '', text)
+    
+    # Clean up multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Remove any control characters that might cause issues
+    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
+    
+    return text.strip()
+
 def format_content_details_text(item: dict, content_idx: int) -> str:
     """Format content item details text."""
     title = item.get('title', 'Untitled')
     
+    # Clean title to prevent entity parsing errors
+    clean_title = _clean_text_for_telegram(title)
+    
+    # Clean URL to prevent issues
+    url = item.get('url', 'N/A')
+    clean_url = _clean_text_for_telegram(url[:80]) if url != 'N/A' else 'N/A'
+    
     return f"""
 🔥 Content Preview 🔥
 
-{title}
+{clean_title}
 
 📁 Type: {item.get('type', 'Unknown')}
-🔗 Source: {item.get('url', 'N/A')[:80]}...
+🔗 Source: {clean_url}...
 
 Ready to view or download? Choose below 👇
     """

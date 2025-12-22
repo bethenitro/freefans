@@ -134,8 +134,7 @@ class HTTPFetcher:
         self._min_delay = 0.5  # Minimum 500ms delay
         self._max_delay = 2.0   # Maximum 2s delay
         self._last_request_times = {}  # Track per-domain timing
-        self._rate_limit_lock = asyncio.Lock()
-        self._domain_locks = {}  # Per-domain locks
+        self._domain_locks = {}  # Per-domain locks (per event loop)
         
         # Request failure tracking for adaptive delays
         self._failure_counts = {}
@@ -148,9 +147,10 @@ class HTTPFetcher:
             keepalive_expiry=60.0
         )
         
-        self._clients = {}  # Multiple clients for different domains
+        # Store clients per event loop to avoid cross-loop issues
+        self._clients = {}  # {loop_id: {domain: client}}
         self._limits = limits
-        self._client_lock = asyncio.Lock()
+        self._client_locks = {}  # Per-loop locks
         
         # Thread pool for CPU-intensive operations
         self._thread_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="fetcher")
@@ -163,32 +163,80 @@ class HTTPFetcher:
         except:
             return 'default'
     
+    def _get_loop_id(self) -> int:
+        """Get unique ID for current event loop."""
+        try:
+            loop = asyncio.get_running_loop()
+            return id(loop)
+        except RuntimeError:
+            return 0  # No loop
+    
     async def _get_client_for_domain(self, domain: str) -> httpx.AsyncClient:
-        """Get or create a client for specific domain with rotating headers."""
-        async with self._client_lock:
-            if domain not in self._clients:
-                # Create client with randomized headers
-                headers = _get_random_headers()
-                headers.update(self.base_headers)  # Override with config headers if available
-                
-                self._clients[domain] = httpx.AsyncClient(
-                    timeout=30.0,
-                    follow_redirects=True,
-                    limits=self._limits,
-                    headers=headers,
-                    cookies=self.cookies
-                )
-                logger.debug(f"Created new HTTP client for domain: {domain}")
+        """Get or create a client for specific domain with rotating headers (event loop aware)."""
+        # Get current event loop
+        try:
+            current_loop = asyncio.get_running_loop()
+            if current_loop.is_closed():
+                logger.warning(f"Current event loop is closed, cannot create client for {domain}")
+                raise RuntimeError("Event loop is closed")
+            loop_id = id(current_loop)
+        except RuntimeError as e:
+            logger.warning(f"No valid event loop available for {domain}: {e}")
+            raise
+        
+        # Get or create lock for this event loop
+        if loop_id not in self._client_locks:
+            self._client_locks[loop_id] = asyncio.Lock()
+        
+        async with self._client_locks[loop_id]:
+            # Initialize clients dict for this loop if needed
+            if loop_id not in self._clients:
+                self._clients[loop_id] = {}
             
-            return self._clients[domain]
+            # Check if existing client is still valid
+            if domain in self._clients[loop_id]:
+                client = self._clients[loop_id][domain]
+                # Test if client is still usable
+                try:
+                    if client.is_closed:
+                        logger.debug(f"Client for {domain} in loop {loop_id} is closed, creating new one")
+                        del self._clients[loop_id][domain]
+                    else:
+                        return client
+                except Exception as e:
+                    logger.debug(f"Client for {domain} in loop {loop_id} is invalid: {e}, creating new one")
+                    try:
+                        await client.aclose()
+                    except:
+                        pass
+                    if domain in self._clients[loop_id]:
+                        del self._clients[loop_id][domain]
+            
+            # Create new client with randomized headers
+            headers = _get_random_headers()
+            headers.update(self.base_headers)  # Override with config headers if available
+            
+            self._clients[loop_id][domain] = httpx.AsyncClient(
+                timeout=30.0,
+                follow_redirects=True,
+                limits=self._limits,
+                headers=headers,
+                cookies=self.cookies
+            )
+            logger.debug(f"Created new HTTP client for domain: {domain} in loop {loop_id}")
+            
+            return self._clients[loop_id][domain]
     
     async def _adaptive_rate_limit(self, domain: str):
         """Apply adaptive rate limiting based on success/failure rates."""
-        # Get or create domain lock
-        if domain not in self._domain_locks:
-            self._domain_locks[domain] = asyncio.Lock()
+        loop_id = self._get_loop_id()
         
-        async with self._domain_locks[domain]:
+        # Get or create domain lock for this event loop
+        lock_key = (loop_id, domain)
+        if lock_key not in self._domain_locks:
+            self._domain_locks[lock_key] = asyncio.Lock()
+        
+        async with self._domain_locks[lock_key]:
             current_time = time.time()
             last_request = self._last_request_times.get(domain, 0)
             
@@ -328,6 +376,18 @@ class HTTPFetcher:
                         new_headers.update(self.base_headers)
                         client.headers.update(new_headers)
                     
+                    # Check if we're in a valid event loop
+                    try:
+                        loop = asyncio.get_running_loop()
+                        if loop.is_closed():
+                            logger.warning(f"Event loop is closed for {url}, skipping request")
+                            self._record_request_result(domain, False)
+                            return None
+                    except RuntimeError:
+                        logger.warning(f"No event loop available for {url}, skipping request")
+                        self._record_request_result(domain, False)
+                        return None
+                    
                     response = await client.get(url)
                     response.raise_for_status()
                     
@@ -366,11 +426,45 @@ class HTTPFetcher:
                     continue
                     
                 except Exception as e:
-                    logger.warning(f"Request error for {url} (attempt {attempt + 1}): {e}")
-                    if attempt == retry_count:
-                        self._record_request_result(domain, False)
-                        return None
-                    continue
+                    error_msg = str(e)
+                    if any(keyword in error_msg.lower() for keyword in [
+                        "event loop is closed", 
+                        "different event loop", 
+                        "cannot send a request", 
+                        "client has been closed",
+                        "connection pool is closed"
+                    ]):
+                        logger.warning(f"Event loop error for {url} (attempt {attempt + 1}): {e}")
+                        # Force recreate the client for this domain
+                        if attempt < retry_count:
+                            loop_id = self._get_loop_id()
+                            if loop_id in self._client_locks:
+                                async with self._client_locks[loop_id]:
+                                    if loop_id in self._clients and domain in self._clients[loop_id]:
+                                        try:
+                                            await self._clients[loop_id][domain].aclose()
+                                        except:
+                                            pass
+                                        del self._clients[loop_id][domain]
+                            # Small delay before retry
+                            await asyncio.sleep(1.0)
+                            # Try to get a fresh client for next attempt
+                            try:
+                                client = await self._get_client_for_domain(domain)
+                            except Exception as client_err:
+                                logger.warning(f"Failed to recreate client for {domain}: {client_err}")
+                                self._record_request_result(domain, False)
+                                return None
+                            continue
+                        else:
+                            self._record_request_result(domain, False)
+                            return None
+                    else:
+                        logger.warning(f"Request error for {url} (attempt {attempt + 1}): {e}")
+                        if attempt == retry_count:
+                            self._record_request_result(domain, False)
+                            return None
+                        continue
             
             # All retries failed
             self._record_request_result(domain, False)
@@ -419,26 +513,43 @@ class HTTPFetcher:
         total_failure = sum(self._failure_counts.values())
         total_requests = total_success + total_failure
         
+        # Count total clients across all event loops
+        total_clients = sum(len(clients) for clients in self._clients.values())
+        
         return {
             'total_requests': total_requests,
             'successful_requests': total_success,
             'failed_requests': total_failure,
             'success_rate': total_success / total_requests if total_requests > 0 else 0,
             'domains_tracked': len(self._success_counts),
-            'active_clients': len(self._clients),
+            'active_clients': total_clients,
+            'event_loops': len(self._clients),
             'cache_size': len(_http_response_cache)
         }
     
     async def close(self):
         """Close all HTTP clients and thread pool."""
-        async with self._client_lock:
-            for domain, client in self._clients.items():
-                try:
-                    await client.aclose()
-                    logger.debug(f"Closed HTTP client for domain: {domain}")
-                except Exception as e:
-                    logger.warning(f"Error closing client for {domain}: {e}")
-            self._clients.clear()
+        # Close clients for all event loops
+        for loop_id in list(self._clients.keys()):
+            if loop_id in self._client_locks:
+                async with self._client_locks[loop_id]:
+                    for domain, client in list(self._clients[loop_id].items()):
+                        try:
+                            await client.aclose()
+                            logger.debug(f"Closed HTTP client for domain: {domain} in loop {loop_id}")
+                        except Exception as e:
+                            logger.warning(f"Error closing client for {domain} in loop {loop_id}: {e}")
+                    self._clients[loop_id].clear()
+            else:
+                # No lock available, just try to close
+                for domain, client in list(self._clients.get(loop_id, {}).items()):
+                    try:
+                        await client.aclose()
+                    except:
+                        pass
+        
+        self._clients.clear()
+        self._client_locks.clear()
         
         # Shutdown thread pool
         self._thread_pool.shutdown(wait=True)

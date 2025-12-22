@@ -42,6 +42,12 @@ def _clean_media_page_cache():
         for key, _ in sorted_items[:len(_media_page_cache) - _media_page_cache_max_size]:
             del _media_page_cache[key]
 
+def _clear_all_media_page_cache():
+    """Clear all media page cache entries."""
+    global _media_page_cache
+    _media_page_cache.clear()
+    logger.info("✅ Cleared all media page cache entries")
+
 def _get_cached_media_page(media_type: str, creator_url: str, page: int) -> Optional[list]:
     """Get cached formatted media page messages."""
     _clean_media_page_cache()
@@ -274,7 +280,8 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         bot_instance.content_manager.search_creator_content(
             creator_name,
             session.filters,
-            direct_url=creator_url
+            direct_url=creator_url,
+            cache_only=False  # Enable on-demand caching for new queries
         )
     )
     
@@ -401,7 +408,8 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
         bot_instance.content_manager.search_creator_content(
             creator_name,
             session.filters,
-            direct_url=creator_url
+            direct_url=creator_url,
+            cache_only=False  # Enable on-demand caching for new queries
         )
     )
     
@@ -843,56 +851,82 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
             except Exception as e:
                 logger.error(f"Failed to send cached image batch: {e}")
             
+            # Delay for cached images too
             if i + batch_size < len(message_tasks):
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5)
+            else:
+                await asyncio.sleep(0.3)
     else:
         await query.edit_message_text(f"Loading pictures {start_idx + 1}-{min(end_idx, len(preview_images))}...")
         
-        # Build messages to send and cache
-        messages_to_cache = []
-        message_tasks = []
+        # Import landing service
+        from landing_service import landing_service
         
-        for idx, item in enumerate(page_items, start=start_idx):
-            image_url = item.get('url', '')
-            domain = item.get('domain', 'Unknown')
+        creator_name = session.current_creator or 'Unknown Creator'
+        
+        # Generate all landing URLs concurrently
+        async def generate_picture_data(idx: int, item: dict) -> dict:
+            """Generate landing URL and message data for a picture"""
+            original_url = item.get('url', '')
+            
+            landing_url = await landing_service.generate_landing_url_async(
+                creator_name=creator_name,
+                content_title=f'Picture #{start_idx + idx + 1}',
+                content_type='🖼️ Picture',
+                original_url=original_url,
+                preview_url=original_url,
+                thumbnail_url=original_url
+            )
             
             message_text = f"""
-🖼️ Picture #{idx + 1}
+🖼️ Picture #{start_idx + idx + 1}
 
 🔗 Click link below to view full image:
-{image_url}
+{landing_url}
 
             """
             
-            # Store for caching
-            messages_to_cache.append({
+            return {
                 'text': message_text,
                 'parse_mode': 'Markdown',
                 'disable_web_page_preview': False
-            })
-            
-            # Create task for sending message
-            message_tasks.append(
-                send_message_with_retry(
-                    query.message.reply_text,
-                    message_text,
-                    parse_mode='Markdown',
-                    disable_web_page_preview=False
-                )
-            )
+            }
         
-        # Send all messages concurrently in batches
+        # Generate all landing URLs concurrently
+        landing_tasks = [
+            generate_picture_data(idx, item)
+            for idx, item in enumerate(page_items)
+        ]
+        messages_to_cache = await asyncio.gather(*landing_tasks, return_exceptions=True)
+        
+        # Send messages concurrently in batches
         batch_size = 5
-        for i in range(0, len(message_tasks), batch_size):
-            batch = message_tasks[i:i+batch_size]
+        for i in range(0, len(messages_to_cache), batch_size):
+            batch = messages_to_cache[i:i+batch_size]
+            
+            # Create send tasks
+            send_tasks = []
+            for msg_data in batch:
+                if isinstance(msg_data, dict):  # Check it's not an exception
+                    send_tasks.append(
+                        send_message_with_retry(
+                            query.message.reply_text,
+                            msg_data['text'],
+                            parse_mode=msg_data['parse_mode'],
+                            disable_web_page_preview=msg_data['disable_web_page_preview']
+                        )
+                    )
+            
             try:
-                await asyncio.gather(*batch, return_exceptions=True)
+                await asyncio.gather(*send_tasks, return_exceptions=True)
             except Exception as e:
                 logger.error(f"Failed to send image batch: {e}")
             
-            # Small delay to respect rate limits
-            if i + batch_size < len(message_tasks):
-                await asyncio.sleep(0.1)
+            # Delay between batches to allow Telegram to fetch preview
+            if i + batch_size < len(messages_to_cache):
+                await asyncio.sleep(0.5)  # 500ms delay for preview loading
+            else:
+                await asyncio.sleep(0.3)  # 300ms delay after last batch
         
         # Cache the messages for this page
         _cache_media_page('pictures', creator_url, page, messages_to_cache)
@@ -1214,32 +1248,52 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
             except Exception as e:
                 logger.error(f"Failed to send cached video batch: {e}")
             
+            # Delay for cached videos too
             if i + batch_size < len(message_tasks):
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5)
+            else:
+                await asyncio.sleep(0.3)
     else:
         await query.edit_message_text(f"Loading videos {start_idx + 1}-{min(end_idx, len(video_links))}...")
         
-        # Build messages to send and cache
-        messages_to_cache = []
-        message_tasks = []
+        # Import required modules
+        from landing_service import landing_service
+        from video_preview_extractor import get_video_preview_async
         
-        for idx, item in enumerate(page_items, start=start_idx):
+        creator_name = session.current_creator or 'Unknown Creator'
+        
+        # Step 1: Extract all previews concurrently using async
+        async def extract_preview_async(url: str) -> Optional[str]:
+            """Extract preview asynchronously"""
+            if 'bunkr' in url.lower():
+                try:
+                    preview = await get_video_preview_async(url)
+                    return preview
+                except Exception as e:
+                    logger.error(f"Failed to extract preview: {e}")
+                    return None
+            return None
+        
+        # Extract all previews concurrently
+        preview_tasks = [
+            extract_preview_async(item.get('url', ''))
+            for item in page_items
+        ]
+        extracted_previews = await asyncio.gather(*preview_tasks, return_exceptions=True)
+        
+        # Step 2: Generate all landing URLs concurrently
+        async def generate_landing_data(idx: int, item: dict, preview_url: Optional[str]) -> dict:
+            """Generate landing URL and prepare message data"""
             original_url = item.get('url', '')
-            title = item.get('title', f'Video #{idx + 1}')
-            domain = item.get('domain', 'Unknown')
-            creator_name = session.current_creator or 'Unknown Creator'
+            title = item.get('title', f'Video #{start_idx + idx + 1}')
             
-            # Import landing service
-            from landing_service import landing_service
-            
-            # Generate landing page URL
             landing_url = await landing_service.generate_landing_url_async(
                 creator_name=creator_name,
                 content_title=title,
                 content_type=item.get('type', '🎬 Video'),
                 original_url=original_url,
-                preview_url=None,  # Videos don't have preview URLs typically
-                thumbnail_url=None
+                preview_url=preview_url if isinstance(preview_url, str) else None,
+                thumbnail_url=preview_url if isinstance(preview_url, str) else None
             )
             
             message_text = f"""🎬 {title}
@@ -1248,33 +1302,42 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
 
 💡 Click the link above to view the video with preview and access options."""
             
-            # Store for caching
-            messages_to_cache.append({
+            return {
                 'text': message_text,
                 'disable_web_page_preview': False
-            })
-            
-            # Create task for sending message
-            message_tasks.append(
-                send_message_with_retry(
-                    query.message.reply_text,
-                    message_text,
-                    disable_web_page_preview=False
-                )
-            )
+            }
         
-        # Send all messages concurrently in batches
-        batch_size = 5
-        for i in range(0, len(message_tasks), batch_size):
-            batch = message_tasks[i:i+batch_size]
+        # Generate all landing URLs concurrently
+        landing_tasks = [
+            generate_landing_data(idx, item, preview)
+            for idx, (item, preview) in enumerate(zip(page_items, extracted_previews))
+        ]
+        messages_to_cache = await asyncio.gather(*landing_tasks, return_exceptions=True)
+        
+        # Step 3: Send videos in batches of 3 for faster delivery
+        batch_size = 3
+        for i in range(0, len(messages_to_cache), batch_size):
+            batch = messages_to_cache[i:i+batch_size]
+            
+            # Send batch concurrently
+            send_tasks = []
+            for msg_data in batch:
+                if isinstance(msg_data, dict):  # Check it's not an exception
+                    send_tasks.append(
+                        send_message_with_retry(
+                            query.message.reply_text,
+                            msg_data['text'],
+                            disable_web_page_preview=msg_data['disable_web_page_preview']
+                        )
+                    )
+            
             try:
-                await asyncio.gather(*batch, return_exceptions=True)
+                await asyncio.gather(*send_tasks, return_exceptions=True)
+                # Delay between batches for Telegram preview loading
+                if i + batch_size < len(messages_to_cache):
+                    await asyncio.sleep(0.5)
             except Exception as e:
                 logger.error(f"Failed to send video batch: {e}")
-            
-            # Small delay to respect rate limits
-            if i + batch_size < len(message_tasks):
-                await asyncio.sleep(0.1)
         
         # Cache the messages for this page
         _cache_media_page('videos', creator_url, page, messages_to_cache)
@@ -1817,9 +1880,11 @@ async def display_of_feed_page(query, session, page: int) -> None:
         except Exception as e:
             logger.error(f"Error sending message batch: {e}")
         
-        # Small delay between batches to respect rate limits
+        # Delay between batches to allow Telegram to fetch preview
         if i + batch_size < len(message_tasks):
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)  # 500ms delay for preview loading
+        else:
+            await asyncio.sleep(0.3)  # 300ms delay after last batch
     
     # Send navigation message at the end
     nav_text = f"\n� Page {page + 1} of {total_pages}\n\nUse the buttons below to navigate:"

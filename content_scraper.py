@@ -78,6 +78,19 @@ class SimpleCityScraper:
     def __init__(self, curl_config_path: str = 'curl_config.txt'):
         self.fetcher = HTTPFetcher(curl_config_path)
     
+    async def close(self):
+        """Close the HTTP fetcher and cleanup resources."""
+        if hasattr(self, 'fetcher') and self.fetcher:
+            await self.fetcher.close()
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.close()
+    
     def search_model_in_csv(self, creator_name: str, csv_path: str = 'onlyfans_models.csv'):
         """Search for a creator in the CSV file."""
         return search_model_in_csv(creator_name, csv_path)

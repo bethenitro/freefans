@@ -46,10 +46,21 @@ class ContentManager:
             # Always check persistent cache first
             cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24)
             if cached_result:
-                logger.info(f"✓ Using cached content for: {creator_name}")
-                # Apply filters to cached content
-                filtered_result = self._apply_filters_to_result(cached_result, filters)
-                return filtered_result
+                # Check if cached result has actual content (not empty cache)
+                total_content = (
+                    cached_result.get('total_items', 0) + 
+                    cached_result.get('total_preview_images', 0) + 
+                    cached_result.get('total_video_links', 0)
+                )
+                
+                if total_content > 0:
+                    logger.info(f"✓ Using cached content for: {creator_name} ({total_content} items)")
+                    # Apply filters to cached content
+                    filtered_result = self._apply_filters_to_result(cached_result, filters)
+                    return filtered_result
+                else:
+                    logger.info(f"⚠️  Cached content for {creator_name} is empty (0 items), will fetch fresh data")
+                    # Continue to fetch externally even if cache exists but is empty
             
             # If cache_only mode, don't fetch externally
             if cache_only:
@@ -161,6 +172,24 @@ class ContentManager:
                 'has_more_pages': scrape_result['has_more_pages'],
                 'social_links': scrape_result.get('social_links', {})  # Pass through social links
             }
+            
+            # Save to persistent cache for future use
+            try:
+                cache_data = {
+                    'items': content_items,
+                    'preview_images': preview_items,
+                    'video_links': video_items,
+                    'total_pages': scrape_result['total_pages'],
+                    'social_links': scrape_result.get('social_links', {})
+                }
+                self.cache_manager.save_creator_cache(
+                    creator_name=scrape_result['creator_name'],
+                    url=scrape_result['url'],
+                    content_data=cache_data
+                )
+                logger.info(f"✓ Cached content for {scrape_result['creator_name']}")
+            except Exception as e:
+                logger.error(f"Failed to cache content for {creator_name}: {e}")
             
             logger.info(f"Found {len(content_items)} items for creator: {creator_name}")
             return result
