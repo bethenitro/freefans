@@ -14,3 +14,4 @@ logs.txt
 
 content_cache.db
 bunkr.html
+*.db
