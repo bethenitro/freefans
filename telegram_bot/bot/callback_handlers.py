@@ -399,8 +399,11 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
     
     # Add creator to CSV (silently)
     try:
-        bot_instance.content_manager.scraper.add_creator_to_csv(creator_name, creator_url)
-        logger.info(f"Added creator to CSV: {creator_name}")
+        added = bot_instance.content_manager.scraper.add_creator_to_csv(creator_name, creator_url)
+        if added:
+            logger.info(f"Added creator to CSV: {creator_name}")
+        else:
+            logger.info(f"Creator already exists in CSV: {creator_name}")
     except Exception as e:
         logger.error(f"Failed to add creator to CSV: {e}")
     

@@ -23,7 +23,7 @@ from bot.admin_handlers import (
 from bot.worker_handlers import (
     handle_worker_reply, worker_stats_command, worker_help_command
 )
-from managers.dual_cache_manager import DualCacheManager
+from managers.cache_factory import get_cache_manager
 from core.content_scraper import SimpleCityScraper
 
 # Add shared directory to path for config and data access
@@ -45,9 +45,9 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 class FreeFansBot:
     """Main bot class that coordinates all bot operations."""
     
-    def __init__(self, cache_manager: DualCacheManager):
-        self.cache_manager = cache_manager
-        self.content_manager = ContentManager(cache_manager)
+    def __init__(self, cache_manager=None):
+        self.cache_manager = cache_manager or get_cache_manager()
+        self.content_manager = ContentManager(self.cache_manager)
         self.user_sessions = {}
 
     
@@ -200,9 +200,9 @@ def main():
         print("TELEGRAM_BOT_TOKEN=your_bot_token_here")
         return
     
-    # Initialize cache manager
-    print("💾 Initializing dual cache manager (SQLite + Supabase)...")
-    cache_manager = DualCacheManager()
+    # Initialize cache manager based on configuration
+    print("💾 Initializing cache manager...")
+    cache_manager = get_cache_manager()
     cache_stats = cache_manager.get_cache_stats()
     print(f"✅ Cache ready: {cache_stats['total_creators']} creators, "
           f"{cache_stats['total_content_items']} items cached")
@@ -234,7 +234,7 @@ def main():
     )
     
     # Initialize bot with cache manager
-    bot = FreeFansBot(cache_manager)
+    bot = FreeFansBot()
     
     # Register handlers
     application.add_handler(CommandHandler("start", bot.start))
