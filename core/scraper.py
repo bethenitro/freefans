@@ -27,8 +27,11 @@ class OnlyFansForumScraper:
         """Initialize the scraper with headers and base URL."""
         self.base_url = "https://simpcity.cr"
         self.forum_url = "https://simpcity.cr/forums/onlyfans.8/"
-        self.data_file = 'data/onlyfans_models.csv'
+        self.data_file = '../shared/data/onlyfans_models.csv'  # Path relative to core directory
         self.checkpoint_file = 'scraper_checkpoint.json'
+        
+        # Ensure data directory exists
+        os.makedirs(os.path.dirname(self.data_file), exist_ok=True)
         
         # Headers from the curl command
         self.headers = {
@@ -213,10 +216,81 @@ class OnlyFansForumScraper:
         
         print(f"✓ Successfully {'appended' if append_mode else 'saved'} data to {filename}")
     
+    def get_csv_row_count(self) -> int:
+        """Get the current number of rows in the CSV file (excluding header)."""
+        if not os.path.exists(self.data_file):
+            return 0
+        
+        try:
+            with open(self.data_file, 'r', encoding='utf-8') as csvfile:
+                reader = csv.reader(csvfile)
+                # Skip header and count rows
+                row_count = sum(1 for row in reader) - 1  # Subtract 1 for header
+                return max(0, row_count)  # Ensure non-negative
+        except Exception as e:
+            print(f"⚠️  Error counting CSV rows: {e}")
+            return 0
+    
+    def verify_csv_append(self, expected_new_count: int, creator_name: str = "") -> bool:
+        """Verify that the CSV file has the expected number of new rows."""
+        current_count = self.get_csv_row_count()
+        
+        if hasattr(self, '_last_csv_count'):
+            actual_new_count = current_count - self._last_csv_count
+            if actual_new_count == expected_new_count:
+                if creator_name:
+                    print(f"✅ Verified: {creator_name} successfully appended (CSV: {self._last_csv_count} → {current_count})")
+                else:
+                    print(f"✅ Verified: {expected_new_count} rows successfully appended (CSV: {self._last_csv_count} → {current_count})")
+                self._last_csv_count = current_count
+                return True
+            else:
+                print(f"❌ Verification failed: Expected {expected_new_count} new rows, but found {actual_new_count}")
+                print(f"   CSV count: {self._last_csv_count} → {current_count}")
+                self._last_csv_count = current_count
+                return False
+        else:
+            # First time, just set the baseline
+            self._last_csv_count = current_count
+            print(f"📊 CSV baseline set: {current_count} rows")
+            return True
     def append_new_models_to_csv(self, new_models: List[Dict[str, str]]):
         """Append new models to the CSV file, avoiding duplicates."""
         if new_models:
+            print(f"📝 Appending {len(new_models)} new creators to CSV...")
             self.save_to_csv(new_models, append_mode=True)
+            # Verify the append worked
+            self.verify_csv_append(len(new_models))
+        else:
+            print("ℹ️  No new creators to append")
+    
+    def append_single_model_to_csv(self, model: Dict[str, str]):
+        """Append a single model to the CSV file immediately."""
+        # Ensure data directory exists
+        os.makedirs(os.path.dirname(self.data_file), exist_ok=True)
+        
+        # Check if file exists to determine if we need to write header
+        file_exists = os.path.exists(self.data_file)
+        
+        with open(self.data_file, 'a', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['model_name', 'profile_link']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            # Write header only if it's a new file
+            if not file_exists:
+                writer.writeheader()
+            
+            # Write the single model
+            writer.writerow({
+                'model_name': self.clean_model_name(model['model_name']),
+                'profile_link': model['profile_link']
+            })
+        
+        creator_name = self.clean_model_name(model['model_name'])
+        print(f"💾 Instantly saved: {creator_name}")
+        
+        # Verify the append worked
+        self.verify_csv_append(1, creator_name)
     
     async def scrape_all_pages(self, max_pages: int = 165) -> List[Dict[str, str]]:
         """
@@ -232,6 +306,9 @@ class OnlyFansForumScraper:
         # Load existing data and checkpoint
         all_models, scraped_links = self.load_existing_data()
         checkpoint = self.load_checkpoint()
+        
+        # Initialize CSV row count baseline for verification
+        self.verify_csv_append(0)  # Set baseline
         
         # Convert scraped_links from checkpoint (which is a list) back to a set
         if checkpoint.get('scraped_links'):
@@ -291,26 +368,29 @@ class OnlyFansForumScraper:
                         
                         page_num, page_models = result
                         
-                        # Filter out models we already have
-                        new_models = []
+                        # Process models one by one and append immediately
+                        new_models_for_page = []
                         for model in page_models:
                             if model['profile_link'] not in scraped_links:
-                                new_models.append(model)
+                                # Add to scraped links immediately
                                 scraped_links.add(model['profile_link'])
+                                all_models.append(model)
+                                new_models_for_page.append(model)
+                                
+                                # Append to CSV immediately for each new creator
+                                self.append_single_model_to_csv(model)
                         
-                        print(f"📊 Page {page_num}: Found {len(page_models)} models ({len(new_models)} new)")
+                        print(f"📊 Page {page_num}: Found {len(page_models)} models ({len(new_models_for_page)} new)")
                         
-                        # Add new models to the collection
-                        all_models.extend(new_models)
-                        
-                        # Save new models to CSV immediately (append mode)
-                        if new_models:
-                            self.append_new_models_to_csv(new_models)
+                        if new_models_for_page:
+                            print(f"✅ Immediately saved {len(new_models_for_page)} new creators to CSV")
+                        else:
+                            print(f"ℹ️  All creators from page {page_num} already exist in CSV")
                         
                         # Save checkpoint after each page
                         self.save_checkpoint(page_num, len(all_models), scraped_links)
                         
-                        print(f"💾 Progress saved. Total models so far: {len(all_models)}")
+                        print(f"📈 Total unique creators so far: {len(all_models)}")
                     
                 except KeyboardInterrupt:
                     print(f"\n⚠️ Interrupted by user at page {batch_start}")
@@ -337,9 +417,16 @@ async def main():
     """Main function to run the scraper."""
     scraper = OnlyFansForumScraper()
     
+    # Display existing CSV row count at the very beginning
+    initial_csv_count = scraper.get_csv_row_count()
+    print(f"📊 Current CSV file: {scraper.data_file}")
+    print(f"📈 Existing rows in CSV: {initial_csv_count}")
+    print("-" * 60)
+    
     try:
         # Check if we have existing data
         existing_models, _ = scraper.load_existing_data()
+        initial_count = len(existing_models)
         checkpoint = scraper.load_checkpoint()
         
         if existing_models:
@@ -350,10 +437,32 @@ async def main():
         # Scrape all pages (you can change this number if needed)
         models = await scraper.scrape_all_pages(max_pages=165)
         
-        # Display some statistics
-        print("\n📈 Final Fetching Statistics:")
+        # Calculate new creators added
+        new_creators_added = len(models) - initial_count
+        
+        # Final CSV verification
+        final_csv_count = scraper.get_csv_row_count()
+        expected_csv_count = initial_count + new_creators_added
+        
+        print("\n📈 Final Scraping Statistics:")
         print(f"Total unique models: {len(models)}")
+        print(f"New creators added this run: {new_creators_added}")
         print(f"CSV file: {scraper.data_file}")
+        
+        # Verify final CSV state
+        if final_csv_count == expected_csv_count:
+            print(f"✅ CSV Verification: All {new_creators_added} new creators successfully appended")
+            print(f"   CSV rows: {initial_csv_count} → {final_csv_count}")
+        else:
+            print(f"⚠️  CSV Verification Warning:")
+            print(f"   Expected CSV rows: {expected_csv_count}")
+            print(f"   Actual CSV rows: {final_csv_count}")
+            print(f"   Difference: {final_csv_count - expected_csv_count}")
+        
+        if new_creators_added > 0:
+            print(f"🎯 Successfully processed and verified {new_creators_added} new creators!")
+        else:
+            print("ℹ️  No new creators found - CSV file is up to date")
         
         # Show first few models as example
         if models:

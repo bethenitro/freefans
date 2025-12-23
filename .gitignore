@@ -18,3 +18,5 @@ bunkr.html
 *.png
 
 permissions_config.json
+
+scraper_checkpoint.json
