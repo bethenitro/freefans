@@ -1,0 +1,5 @@
+# Landing Server Dependencies
+fastapi
+uvicorn[standard]
+python-decouple
+jinja2

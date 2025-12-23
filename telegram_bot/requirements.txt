@@ -1,0 +1,7 @@
+# Telegram Bot Dependencies
+python-telegram-bot>=20.0
+python-decouple
+httpx
+beautifulsoup4
+rapidfuzz
+lxml

@@ -26,6 +26,11 @@ from bot.worker_handlers import (
 from managers.cache_manager import CacheManager
 from core.content_scraper import SimpleCityScraper
 
+# Add shared directory to path for config and data access
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'shared'))
+
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',

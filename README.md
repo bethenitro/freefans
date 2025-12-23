@@ -1,0 +1,434 @@
+# FreeFans - Multi-Server Architecture
+
+## Overview
+FreeFans is a Telegram bot for accessing creator content with a separate landing page server. The application is split into two independently deployable services:
+
+1. **Telegram Bot** - Handles user interactions, content search, admin/worker management
+2. **Landing Server** - Serves landing pages for content links with previews
+
+## Project Structure
+
+```
+FreeFans/
+├── telegram_bot/          # Telegram bot application
+│   ├── bot.py            # Main bot entry point
+│   ├── bot/              # Bot handlers
+│   ├── core/             # Core business logic
+│   ├── managers/         # Data managers
+│   ├── scrapers/         # Web scraping
+│   ├── utils/            # Utilities
+│   ├── scripts/          # Management scripts
+│   ├── requirements.txt  # Bot dependencies
+│   ├── .env             # Bot configuration
+│   └── README.md        # Bot documentation
+│
+├── landing_server/       # Landing page server
+│   ├── services/        # FastAPI application
+│   ├── static/          # CSS, JS, images
+│   ├── templates/       # HTML templates
+│   ├── requirements.txt # Server dependencies
+│   ├── .env            # Server configuration
+│   └── README.md       # Server documentation
+│
+└── shared/              # Shared resources
+    ├── config/          # Configuration files
+    │   ├── curl_config.txt
+    │   ├── content_domains.txt
+    │   ├── video_domains.txt
+    │   └── permissions_config.json
+    └── data/            # Shared data storage
+        ├── onlyfans_models.csv
+        ├── cache/
+        │   └── content_cache.db
+        ├── requests/
+        │   ├── creator_requests.csv
+        │   └── content_requests.csv
+        └── title_submissions/
+            ├── pending_titles.csv
+            ├── approved_titles.csv
+            └── rejected_titles.csv
+```
+
+## Deployment Architectures
+
+### Architecture 1: Single Server (Development/Small Scale)
+```
+┌─────────────────────────────┐
+│     Single Server           │
+│                             │
+│  ┌────────────────────┐    │
+│  │  Telegram Bot      │    │
+│  │  Port: -           │    │
+│  └────────┬───────────┘    │
+│           │                 │
+│  ┌────────▼───────────┐    │
+│  │  Landing Server    │    │
+│  │  Port: 8001        │    │
+│  └────────────────────┘    │
+│           │                 │
+│  ┌────────▼───────────┐    │
+│  │  Shared Storage    │    │
+│  │  (Local Disk)      │    │
+│  └────────────────────┘    │
+└─────────────────────────────┘
+```
+
+**Setup:**
+```bash
+# Clone repo
+git clone <repo-url> FreeFans
+cd FreeFans
+
+# Setup bot
+cd telegram_bot
+python -m venv env
+source env/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with your tokens
+
+# Setup landing server (new terminal)
+cd ../landing_server
+python -m venv env
+source env/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with server config
+
+# Run both services
+# Terminal 1:
+cd telegram_bot && python bot.py
+
+# Terminal 2:
+cd landing_server && uvicorn services.fastapi_server:app --host 0.0.0.0 --port 8001
+```
+
+### Architecture 2: Separate Servers (Production/High Availability)
+```
+┌──────────────────┐         ┌──────────────────┐
+│  Bot Server      │         │  Landing Server  │
+│                  │         │                  │
+│  Telegram Bot    │         │  FastAPI + Nginx │
+│  Port: -         │◄────────┤  Port: 443/HTTPS │
+│                  │  HTTP   │  (Public)        │
+└────────┬─────────┘         └──────────────────┘
+         │                            ▲
+         │                            │
+         │                     Telegram Servers
+         │                     (Link Previews)
+         │
+         ▼
+┌──────────────────┐
+│  Shared Storage  │
+│  NFS / S3 / DB   │
+│  (Centralized)   │
+└──────────────────┘
+```
+
+**Bot Server Setup:**
+```bash
+# On bot server
+git clone <repo-url> FreeFans
+cd FreeFans/telegram_bot
+
+python -m venv env
+source env/bin/activate
+pip install -r requirements.txt
+
+# Configure for remote landing server
+cat > .env << EOF
+TELEGRAM_BOT_TOKEN=your_bot_token
+LANDING_BASE_URL=https://landing.yourdomain.com
+LANDING_SECRET_KEY=shared_secret_key
+EOF
+
+# Mount shared storage (if using network storage)
+# Option A: NFS
+sudo mount -t nfs storage-server:/path/to/shared /path/to/FreeFans/shared
+
+# Option B: rsync periodically
+rsync -av storage-server:/path/to/shared/ /path/to/FreeFans/shared/
+
+# Run bot
+python bot.py
+```
+
+**Landing Server Setup:**
+```bash
+# On landing server
+git clone <repo-url> FreeFans
+cd FreeFans/landing_server
+
+python -m venv env
+source env/bin/activate
+pip install -r requirements.txt
+
+# Configure
+cat > .env << EOF
+LANDING_HOST=0.0.0.0
+LANDING_PORT=8001
+LANDING_BASE_URL=https://landing.yourdomain.com
+LANDING_SECRET_KEY=shared_secret_key
+EOF
+
+# Setup Nginx reverse proxy
+sudo apt install nginx certbot python3-certbot-nginx
+
+# Configure Nginx (see landing_server/README.md)
+# Setup SSL with Let's Encrypt
+sudo certbot --nginx -d landing.yourdomain.com
+
+# Run server
+uvicorn services.fastapi_server:app --host 0.0.0.0 --port 8001 --workers 4
+```
+
+### Architecture 3: Cloud/Docker (Scalable)
+```
+┌────────────────────────────────────┐
+│         Load Balancer              │
+│         (Nginx / Cloud LB)         │
+└──────┬────────────────────┬────────┘
+       │                    │
+┌──────▼──────┐      ┌──────▼──────┐
+│  Bot Pod 1  │      │  Landing 1  │
+│  (Docker)   │      │  (Docker)   │
+└──────┬──────┘      └──────┬──────┘
+       │                    │
+┌──────▼──────┐      ┌──────▼──────┐
+│  Bot Pod 2  │      │  Landing 2  │
+│  (Docker)   │      │  (Docker)   │
+└──────┬──────┘      └──────┬──────┘
+       │                    │
+       └──────┬─────────────┘
+              │
+        ┌─────▼──────┐
+        │  Redis     │
+        │  Database  │
+        │  S3        │
+        └────────────┘
+```
+
+*Docker setup guide coming soon*
+
+## Quick Start Guide
+
+### 1. Prerequisites
+- Python 3.10+
+- Telegram Bot Token (get from @BotFather)
+- Domain name (for landing server if deploying separately)
+
+### 2. Environment Configuration
+
+**Telegram Bot (.env):**
+```env
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+LANDING_BASE_URL=http://localhost:8001  # Or your landing server URL
+LANDING_SECRET_KEY=change-this-secret-key
+LANDING_ENABLED=true
+```
+
+**Landing Server (.env):**
+```env
+LANDING_HOST=0.0.0.0
+LANDING_PORT=8001
+LANDING_BASE_URL=http://localhost:8001  # Or your public domain
+LANDING_SECRET_KEY=change-this-secret-key
+LANDING_ENABLED=true
+```
+
+### 3. Shared Directory Setup
+
+The `shared/` directory contains config and data needed by the bot:
+
+**Same Server:**
+```bash
+# Already in correct location: ../shared/ relative to telegram_bot/
+```
+
+**Different Servers:**
+```bash
+# Option A: Network mount (NFS)
+sudo mount -t nfs storage-server:/shared /path/to/telegram_bot/../shared
+
+# Option B: Periodic sync (cron)
+*/5 * * * * rsync -av storage-server:/shared/ /path/to/telegram_bot/../shared/
+
+# Option C: Cloud storage (S3, etc.)
+# Modify code to use cloud storage SDK
+```
+
+### 4. Initialize Data
+
+```bash
+cd telegram_bot
+
+# Add yourself as admin
+python scripts/manage_permissions.py add-admin YOUR_TELEGRAM_USER_ID
+
+# Optional: Pre-populate cache
+python scripts/manual_cache.py
+```
+
+### 5. Start Services
+
+**Development (same server):**
+```bash
+# Terminal 1: Bot
+cd telegram_bot
+source env/bin/activate
+python bot.py
+
+# Terminal 2: Landing Server
+cd landing_server
+source env/bin/activate
+uvicorn services.fastapi_server:app --reload
+```
+
+**Production (systemd):**
+```bash
+# See telegram_bot/README.md and landing_server/README.md
+# for systemd service configurations
+```
+
+## Features
+
+### User Features
+- 🔍 Creator search with fuzzy matching
+- 📁 Content browsing (images & videos)
+- 🌐 Social links display
+- 📱 Mobile-friendly interface
+- ⏰ Request new creators/content
+
+### Admin Features
+- 👥 User request management (`/requests`)
+- ✅ Title approval system (`/titles`, `/approve`, `/reject`)
+- 📊 System statistics (`/adminstats`)
+- 👷 Worker management
+- 🔄 Bulk operations
+
+### Worker Features
+- 📝 Submit video titles by replying
+- 📈 View submission stats (`/mystats`)
+- ✍️ Title submission guidelines
+
+## Management
+
+### Add Admins/Workers
+```bash
+cd telegram_bot
+python scripts/manage_permissions.py add-admin <telegram_user_id>
+python scripts/manage_permissions.py add-worker <telegram_user_id>
+```
+
+### Get User ID
+Users can send `/myid` to the bot (if implemented) or use @userinfobot on Telegram.
+
+### View Requests
+```bash
+# Via bot
+/requests  # View pending user requests
+/titles    # View pending title submissions
+
+# Via CSV
+cat shared/data/requests/creator_requests.csv
+cat shared/data/title_submissions/pending_titles.csv
+```
+
+## Security Checklist
+
+- [ ] Change default `LANDING_SECRET_KEY`
+- [ ] Never commit `.env` files
+- [ ] Use HTTPS for landing server
+- [ ] Keep `permissions_config.json` secure
+- [ ] Regularly update dependencies
+- [ ] Use firewall to restrict access
+- [ ] Enable rate limiting on landing server
+- [ ] Regular backups of `shared/data/`
+
+## Monitoring
+
+### Bot Health
+```bash
+# Check if running
+ps aux | grep bot.py
+
+# View logs
+tail -f telegram_bot/logs.txt
+
+# Systemd
+sudo systemctl status freefans-bot
+sudo journalctl -u freefans-bot -f
+```
+
+### Landing Server Health
+```bash
+# Check endpoint
+curl http://localhost:8001/
+
+# View logs
+sudo journalctl -u freefans-landing -f
+
+# Check Nginx (if used)
+sudo nginx -t
+sudo systemctl status nginx
+```
+
+## Backup Strategy
+
+### Critical Data
+```bash
+# Backup shared directory
+tar -czf backup-$(date +%Y%m%d).tar.gz shared/
+
+# Automated daily backup (cron)
+0 2 * * * tar -czf /backups/freefans-$(date +\%Y\%m\%d).tar.gz /path/to/FreeFans/shared/
+```
+
+### Database
+```bash
+# SQLite backup
+sqlite3 shared/data/cache/content_cache.db ".backup shared/data/cache/backup.db"
+```
+
+## Troubleshooting
+
+### Bot not responding
+1. Check bot is running: `ps aux | grep bot.py`
+2. Check Telegram API status
+3. Verify `TELEGRAM_BOT_TOKEN`
+4. Check logs for errors
+
+### Landing pages returning 404
+1. Check landing server is running
+2. Verify `LANDING_BASE_URL` matches actual URL
+3. Check URL expiration (24 hours default)
+4. Verify network connectivity between bot and server
+
+### Import/Module errors
+1. Ensure virtual environment is activated
+2. Install dependencies: `pip install -r requirements.txt`
+3. Check Python version: `python --version` (3.10+ required)
+4. Verify shared directory is accessible
+
+## Development
+
+### Project Structure
+- See `telegram_bot/README.md` for bot architecture
+- See `landing_server/README.md` for server architecture
+
+### Adding Features
+1. Fork the repository
+2. Create feature branch
+3. Make changes
+4. Test thoroughly
+5. Submit pull request
+
+## License
+
+[Your License Here]
+
+## Support
+
+- Documentation: See README files in each service directory
+- Issues: [GitHub Issues]
+- Contact: [Your Contact Info]

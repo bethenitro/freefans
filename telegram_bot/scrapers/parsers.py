@@ -13,6 +13,7 @@ import functools
 import hashlib
 from datetime import datetime, timedelta
 import re
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +192,11 @@ def is_valid_content_image(image_url: str, min_size_indicator: int = 300) -> boo
     return True
 
 
-def load_video_domains(file_path: str = 'config/video_domains.txt') -> List[str]:
+def load_video_domains(file_path: str = None) -> List[str]:
     """Load video hosting domains from configuration file."""
+    if file_path is None:
+        base_dir = Path(__file__).parent.parent.parent
+        file_path = str(base_dir / 'shared' / 'config' / 'video_domains.txt')
     domains = []
     try:
         if os.path.exists(file_path):
@@ -215,8 +219,11 @@ def load_video_domains(file_path: str = 'config/video_domains.txt') -> List[str]
     return domains
 
 
-def load_content_domains(file_path: str = 'config/content_domains.txt') -> List[str]:
+def load_content_domains(file_path: str = None) -> List[str]:
     """Load content hosting domains from configuration file."""
+    if file_path is None:
+        base_dir = Path(__file__).parent.parent.parent
+        file_path = str(base_dir / 'shared' / 'config' / 'content_domains.txt')
     domains = []
     try:
         if os.path.exists(file_path):
