@@ -507,4 +507,87 @@ class CacheManager:
                 cursor = conn.cursor()
                 cursor.execute('SELECT DISTINCT username FROM onlyfans_posts ORDER BY username')
                 return [row[0] for row in cursor.fetchall()]
+    
+    def update_video_title(self, video_url: str, new_title: str) -> bool:
+        """
+        Update the title of a video in the cache.
+        
+        Args:
+            video_url: URL of the video to update
+            new_title: New title for the video
+            
+        Returns:
+            True if updated successfully, False if video not found
+        """
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Update in video_links table
+                cursor.execute('''
+                    UPDATE video_links 
+                    SET title = ?
+                    WHERE url = ?
+                ''', (new_title, video_url))
+                
+                updated = cursor.rowcount > 0
+                
+                # Also update in content_items if it exists there
+                cursor.execute('''
+                    UPDATE content_items 
+                    SET title = ?
+                    WHERE url = ? AND type = 'video'
+                ''', (new_title, video_url))
+                
+                updated = updated or cursor.rowcount > 0
+                
+                conn.commit()
+                
+                if updated:
+                    logger.info(f"Updated video title in cache: {video_url} -> {new_title}")
+                else:
+                    logger.warning(f"Video not found in cache: {video_url}")
+                
+                return updated
+    
+    def get_video_by_url(self, video_url: str) -> Optional[Dict]:
+        """
+        Get video information by URL.
+        
+        Args:
+            video_url: URL of the video
+            
+        Returns:
+            Dict with video info or None if not found
+        """
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Try video_links first
+                cursor.execute('''
+                    SELECT v.*, c.name as creator_name
+                    FROM video_links v
+                    JOIN creators c ON v.creator_id = c.id
+                    WHERE v.url = ?
+                ''', (video_url,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return dict(row)
+                
+                # Try content_items
+                cursor.execute('''
+                    SELECT ci.*, c.name as creator_name
+                    FROM content_items ci
+                    JOIN creators c ON ci.creator_id = c.id
+                    WHERE ci.url = ? AND ci.type = 'video'
+                ''', (video_url,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return dict(row)
+                
+                return None
 

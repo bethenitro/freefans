@@ -60,10 +60,11 @@ class ContentManager:
                     return filtered_result
                 else:
                     logger.info(f"⚠️  Cached content for {creator_name} is empty (0 items), will fetch fresh data")
-                    # Continue to fetch externally even if cache exists but is empty
+                    # Don't use empty cache, treat as cache miss and fetch if allowed
+                    cached_result = None
             
-            # If cache_only mode, don't fetch externally
-            if cache_only:
+            # If cache_only mode and no valid cache, return cache miss
+            if cache_only and not cached_result:
                 logger.info(f"⚠️  No cached content for: {creator_name} (cache-only mode, not fetching)")
                 return {
                     'creator': creator_name,

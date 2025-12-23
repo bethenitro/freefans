@@ -339,7 +339,8 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         await send_message_with_retry(
             query.message.reply_text,
             directory_text,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            disable_web_page_preview=True
         )
         
         # Delete the selection message
@@ -457,7 +458,8 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
         await send_message_with_retry(
             query.message.reply_text,
             directory_text,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            disable_web_page_preview=True
         )
         
         # Delete the selection message
@@ -531,7 +533,8 @@ async def display_content_directory_from_callback(query, session, content_direct
         await send_message_with_retry(
             query.message.reply_text,
             directory_text,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            disable_web_page_preview=True
         )
     except (TimedOut, NetworkError) as e:
         logger.error(f"Failed to display content directory from callback: {e}")
@@ -604,7 +607,7 @@ async def handle_load_more_pages(query, session, bot_instance) -> None:
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(directory_text, reply_markup=reply_markup)
+            await query.edit_message_text(directory_text, reply_markup=reply_markup, disable_web_page_preview=True)
             
             # Success message shown in the updated content
         else:
@@ -800,7 +803,7 @@ async def handle_back_to_list(query, session) -> None:
     keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(directory_text, reply_markup=reply_markup)
+    await query.edit_message_text(directory_text, reply_markup=reply_markup, disable_web_page_preview=True)
 
 async def handle_view_pictures(query, session, page: int = 0) -> None:
     """Show preview pictures list."""
@@ -1299,8 +1302,7 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
             message_text = f"""🎬 {title}
 
 🔗 Access Link: {landing_url}
-
-💡 Click the link above to view the video with preview and access options."""
+"""
             
             return {
                 'text': message_text,
@@ -1836,18 +1838,69 @@ async def display_of_feed_page(query, session, page: int) -> None:
         ]
         
         # Fetch batch concurrently
-        batch_results = await asyncio.gather(tasks)
+        batch_results = await asyncio.gather(*tasks)
         all_post_data.extend(batch_results)
         
         # Reduced delay between batches from 0.5s to 0.2s
         if batch_end < len(page_posts):
             await asyncio.sleep(0.2)
     
-    # Send media to Telegram - OPTIMIZED WITH CONCURRENT SENDING
-    # Group messages into batches for concurrent sending
-    message_tasks = []
+    # Send media to Telegram - OPTIMIZED WITH CONCURRENT SENDING & LANDING PAGES
+    # Import landing service
+    from landing_service import landing_service
     
-    for post_data in all_post_data:
+    # Generate landing URLs for all media items concurrently
+    async def generate_landing_for_media(post_idx: int, caption: str, media_type: str, media_url: str) -> dict:
+        """Generate landing URL for a media item"""
+        try:
+            # Extract post number from caption if available
+            post_match = re.search(r'Post #(\d+)', caption) if caption else None
+            post_num = post_match.group(1) if post_match else str(post_idx + 1)
+            
+            content_title = f"OnlyFans Post #{post_num}"
+            content_type = "🖼️ Photo" if media_type == 'photo' else "🎬 Video"
+            
+            # Generate landing URL
+            landing_url = await landing_service.generate_landing_url_async(
+                creator_name=username,
+                content_title=content_title,
+                content_type=content_type,
+                original_url=media_url,
+                preview_url=media_url if media_type == 'photo' else None,
+                thumbnail_url=media_url if media_type == 'photo' else None
+            )
+            
+            # Format message based on media type
+            media_label = "Image Post" if media_type == 'photo' else "Video Post"
+            media_icon = "🖼️" if media_type == 'photo' else "🎬"
+            
+            if caption:
+                message_text = f"{caption}\n\n{media_icon} {media_label}:\n{landing_url}"
+            else:
+                message_text = f"{media_icon} {media_label}:\n{landing_url}"
+            
+            return {
+                'text': message_text,
+                'disable_web_page_preview': False
+            }
+        except Exception as e:
+            logger.error(f"Error generating landing URL for OF post: {e}")
+            # Fallback to direct URL
+            media_label = "Image Post" if media_type == 'photo' else "Video Post"
+            media_icon = "🖼️" if media_type == 'photo' else "🎬"
+            
+            if caption:
+                message_text = f"{caption}\n\n{media_icon} {media_label}:\n{media_url}"
+            else:
+                message_text = f"{media_icon} {media_label}:\n{media_url}"
+            return {
+                'text': message_text,
+                'disable_web_page_preview': False
+            }
+    
+    # Prepare all landing URL generation tasks
+    landing_tasks = []
+    for post_idx, post_data in enumerate(all_post_data):
         if not post_data:
             continue
             
@@ -1855,20 +1908,30 @@ async def display_of_feed_page(query, session, page: int) -> None:
         
         if media_items:
             for media_type, media_url in media_items:
-                media_icon = "🖼️" if media_type == 'photo' else "🎬"
-                message_text = f"{caption}\n\n{media_icon} Media Link:\n{media_url}" if caption else f"{media_icon} Media Link:\n{media_url}"
-                
-                # Create task for sending message
-                message_tasks.append(
-                    query.message.reply_text(message_text, disable_web_page_preview=False)
+                landing_tasks.append(
+                    generate_landing_for_media(post_idx, caption, media_type, media_url)
                 )
-                
                 # Only send caption with first media item
                 caption = None
         else:
-            # No media, send text-only message
+            # No media, create a simple async task that returns text-only message data
+            async def create_text_only_message(text):
+                return {'text': f"{text}\n\n💬 Text-only post", 'disable_web_page_preview': False}
+            
+            landing_tasks.append(create_text_only_message(caption))
+    
+    # Generate all landing URLs concurrently
+    message_data_list = await asyncio.gather(*landing_tasks, return_exceptions=True)
+    
+    # Create message tasks from generated data
+    message_tasks = []
+    for msg_data in message_data_list:
+        if isinstance(msg_data, dict):
             message_tasks.append(
-                query.message.reply_text(f"{caption}\n\n💬 Text-only post")
+                query.message.reply_text(
+                    msg_data['text'],
+                    disable_web_page_preview=msg_data.get('disable_web_page_preview', False)
+                )
             )
     
     # Send all messages concurrently in batches to avoid Telegram rate limits

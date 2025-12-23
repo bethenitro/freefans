@@ -4,7 +4,7 @@ Command Handlers - Handles bot commands like /start, /help
 
 import logging
 import asyncio
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ContextTypes
 from telegram.error import TimedOut, NetworkError
 from bot.utilities import send_message_with_retry
@@ -26,38 +26,50 @@ What I can do for you:
 📱 Access OnlyFans archives
 💾 Download everything you want
 
-💋 Just send me a creator's name and let's get started!
+💋 Use the menu buttons below to get started!
 """
 
 HELP_TEXT = """
-� FreeFans Bot Help �
+📖 FreeFans Bot Help 📖
 
-� How to Find What You Want
-
+🔍 Search Creator
 Type any creator's name and I'll find their hottest content. The search is smart - even partial names work!
 
-� What You Get Access To
+📝 Request Creator
+Don't see a creator? Request them to be added! I'll need:
+  • Social media platform (OnlyFans, Instagram, etc.)
+  • Creator's username
+  
+🎯 Request Content  
+Looking for specific content from a creator? Let me know:
+  • Creator's social media & username
+  • Exact details of what you're looking for
+  
+📁 What You Get Access To
 
 🖼️ Photos - High-res galleries, full albums
 🎬 Videos - Stream or download premium clips  
 📱 OnlyFans Archives - Complete feed history
 💎 Exclusive Content - Hard to find anywhere else
 
-⚙️ Customize Your Experience
-
-Use filters to find exactly what you're looking for:
-📁 Photos only, videos only, or everything
-📅 Recent uploads or all-time favorites
-🎬 HD quality or any resolution
-
 ⚡ Quick Commands
 
 /start - Get started with the bot
 /help - Show this guide again
-/filters - Set up your preferences
+/cancel - Cancel current operation
 
-Ready to explore? Just send me a creator's name! 😈
+Ready to explore? Use the menu buttons below! 😈
 """
+
+
+def create_main_menu_keyboard():
+    """Create the main menu reply keyboard"""
+    keyboard = [
+        [KeyboardButton("🔍 Search Creator")],
+        [KeyboardButton("📝 Request Creator"), KeyboardButton("🎯 Request Content")],
+        [KeyboardButton("❓ Help")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_instance) -> None:
@@ -65,7 +77,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_
     user_id = update.effective_user.id
     bot_instance.user_sessions[user_id] = UserSession(user_id)
     
-    reply_markup = create_welcome_keyboard()
+    reply_markup = create_main_menu_keyboard()
     
     try:
         await send_message_with_retry(
@@ -87,7 +99,56 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /help is issued."""
+    from permissions_manager import get_permissions_manager
+    
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    help_text = HELP_TEXT
+    
+    # Add admin commands if user is admin
+    if permissions.is_admin(user_id):
+        help_text += "\n\n👑 **Admin Commands:**\n\n"
+        help_text += "• /requests - View pending user requests\n"
+        help_text += "• /titles - View pending title submissions\n"
+        help_text += "• /approve <id> - Approve a title\n"
+        help_text += "• /reject <id> [reason] - Reject a title\n"
+        help_text += "• /bulkapprove <worker_id> - Bulk approve worker\n"
+        help_text += "• /adminstats - View system statistics\n"
+    
+    # Add worker commands if user is worker
+    if permissions.is_worker(user_id):
+        help_text += "\n\n👷 **Worker Commands:**\n\n"
+        help_text += "• Reply to videos with titles to submit\n"
+        help_text += "• /mystats - View your submission stats\n"
+        help_text += "• /workerhelp - Worker guide\n"
+    
+    reply_markup = create_main_menu_keyboard()
     try:
-        await send_message_with_retry(update.message.reply_text, HELP_TEXT)
+        await send_message_with_retry(
+            update.message.reply_text, 
+            help_text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
     except (TimedOut, NetworkError) as e:
         logger.error(f"Failed to send help message: {e}")
+
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_instance) -> None:
+    """Cancel any ongoing operation"""
+    user_id = update.effective_user.id
+    
+    if user_id in bot_instance.user_sessions:
+        session = bot_instance.user_sessions[user_id]
+        # Clear any pending states
+        session.pending_creator_options = None
+        session.pending_creator_name = None
+        session.awaiting_request = None
+        session.request_data = {}
+    
+    reply_markup = create_main_menu_keyboard()
+    await update.message.reply_text(
+        "❌ Operation cancelled. Use the menu buttons to start again.",
+        reply_markup=reply_markup
+    )

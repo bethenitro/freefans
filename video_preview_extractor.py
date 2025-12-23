@@ -199,6 +199,41 @@ class VideoPreviewExtractor:
             logger.error(f"Error extracting Bunkr preview: {e}")
             return None
     
+    async def _validate_gofile_async(self, url: str) -> bool:
+        """
+        Validate if a Gofile URL contains actual content or is deleted/invalid.
+        
+        Returns:
+            True if content exists, False if deleted/invalid
+        """
+        try:
+            client = await self._get_client()
+            response = await client.get(url)
+            response.raise_for_status()
+            
+            html = response.text
+            
+            # Check for error indicators
+            if 'This content does not exist' in html:
+                logger.info(f"Gofile content not found: {url}")
+                return False
+            
+            if 'Folder not found' in html:
+                logger.info(f"Gofile folder not found: {url}")
+                return False
+            
+            if 'prerender-status-code" content="404"' in html:
+                logger.info(f"Gofile 404 error: {url}")
+                return False
+            
+            # If we got here, content seems valid
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating Gofile URL: {e}")
+            # On error, assume it's invalid to be safe
+            return False
+    
     def _extract_gofile_preview(self, url: str) -> Optional[str]:
         """Extract preview from Gofile URL"""
         try:

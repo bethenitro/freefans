@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ content_title }} - {{ creator_name }}</title>
+    
+    <!-- Open Graph / Facebook / Telegram -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:site_name" content="FreeFans">
+    <meta property="og:title" content="{{ content_title }}">
+    <meta property="og:description" content="View content from {{ creator_name }}">
+    {% if og_image %}
+    <meta property="og:image" content="{{ og_image }}">
+    <meta property="og:image:url" content="{{ og_image }}">
+    <meta property="og:image:secure_url" content="{{ og_image }}">
+    <meta property="og:image:alt" content="{{ content_title }}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    {% endif %}
+    
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ content_title }}">
+    <meta name="twitter:description" content="View content from {{ creator_name }}">
+    {% if og_image %}
+    <meta name="twitter:image" content="{{ og_image }}">
+    {% endif %}
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .creator-name {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .content-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        
+        .content-type {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        
+        .media-container {
+            width: 100%;
+            background: #000;
+            position: relative;
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .media-container img {
+            max-width: 100%;
+            max-height: 70vh;
+            object-fit: contain;
+            display: block;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+            margin: auto;
+        }
+        .media-container img[data-is-video="true"]:hover {
+            transform: none;
+        }
+        .media-container img[data-is-video="false"]:hover {
+            transform: scale(1.02);
+        }
+        
+        .no-preview {
+            color: #888;
+            text-align: center;
+            padding: 60px 20px;
+            background: #f5f5f5;
+        }
+        
+        .no-preview i {
+            font-size: 64px;
+            margin-bottom: 16px;
+            color: #ddd;
+        }
+        
+        .action-container {
+            padding: 24px;
+            text-align: center;
+        }
+        
+        .fullscreen-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            padding: 14px 28px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .fullscreen-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+        
+        .fullscreen-btn:active {
+            transform: translateY(0);
+        }
+        
+        .info-text {
+            text-align: center;
+            margin-top: 12px;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        /* Fullscreen overlay */
+        .fullscreen-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 9999;
+            cursor: zoom-out;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .fullscreen-overlay.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .fullscreen-overlay img,
+        .fullscreen-overlay video {
+            max-width: 95%;
+            max-height: 95%;
+            object-fit: contain;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+        }
+        
+        .close-fullscreen {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            font-size: 32px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .close-fullscreen:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: rotate(90deg);
+        }
+        
+        /* Mobile optimizations */
+        @media (max-width: 480px) {
+            body {
+                padding: 0;
+            }
+            
+            .container {
+                border-radius: 0;
+                min-height: 100vh;
+            }
+            
+            .content-title {
+                font-size: 18px;
+            }
+            
+            .media-container {
+                min-height: 250px;
+            }
+        }
+        
+        /* Loading animation */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .container {
+            animation: fadeIn 0.4s ease;
+        }
+    </style>
+    
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="creator-name">
+                <i class="fas fa-user-circle"></i> {{ creator_name }}
+            </div>
+            <div class="content-title">{{ content_title }}</div>
+            <div class="content-type">{{ content_type }}</div>
+        </div>
+        
+        <!-- Media Content -->
+        {% if preview_url or thumbnail_url %}
+        <div class="media-container">
+            {% if is_video %}
+                <!-- Show preview/thumbnail for videos -->
+                <img id="mediaContent" data-is-video="true" src="{{ preview_url or thumbnail_url }}" alt="{{ content_title }}" loading="lazy" style="width: 100%; height: auto;">
+            {% else %}
+                <img id="mediaContent" data-is-video="false" src="{{ preview_url or thumbnail_url }}" alt="{{ content_title }}" loading="lazy">
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <!-- Action Button -->
+        <div class="action-container">
+            <a href="{{ original_url }}" target="_blank" rel="noopener noreferrer" class="fullscreen-btn">
+                <i class="fas fa-external-link-alt"></i>
+                <span>View Original</span>
+            </a>
+            <p class="info-text">
+                <i class="fas fa-info-circle"></i> Opens in a new tab
+            </p>
+        </div>
+    </div>
+    
+    <!-- Fullscreen Overlay -->
+    <div class="fullscreen-overlay" id="fullscreenOverlay" onclick="closeFullscreen()">
+        <button class="close-fullscreen" onclick="closeFullscreen()">
+            <i class="fas fa-times"></i>
+        </button>
+        {% if preview_url %}
+        <img src="{{ preview_url }}" alt="{{ content_title }}">
+        {% elif thumbnail_url %}
+        <img src="{{ thumbnail_url }}" alt="{{ content_title }}">
+        {% endif %}
+    </div>
+    
+    <script>
+        function openFullscreen() {
+            const overlay = document.getElementById('fullscreenOverlay');
+            overlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+        
+        function closeFullscreen(event) {
+            if (event) {
+                event.stopPropagation();
+            }
+            const overlay = document.getElementById('fullscreenOverlay');
+            overlay.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+        
+        // Close on Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeFullscreen();
+            }
+        });
+        
+        // Only allow clicking on image previews (not videos) to open fullscreen
+        const mediaContent = document.getElementById('mediaContent');
+        if (mediaContent && mediaContent.tagName === 'IMG' && mediaContent.dataset.isVideo !== 'true') {
+            mediaContent.addEventListener('click', openFullscreen);
+        }
+    </script>
+</body>
+</html>

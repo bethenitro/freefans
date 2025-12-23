@@ -151,11 +151,13 @@ def format_directory_text(creator_name: str, content_directory: dict, filters: d
     # Build social links section
     social_info = ""
     if social_links.get('onlyfans') or social_links.get('instagram'):
-        social_info = "\n\n\n  Social Links  \n"
+        social_info = "\n\n\n📱 Social Links\n"
         if social_links.get('onlyfans'):
-            social_info += f"\n  🔗 OnlyFans"
+            of_link = social_links['onlyfans']
+            social_info += f"  🔗 OnlyFans: {of_link}\n"
         if social_links.get('instagram'):
-            social_info += f"\n  📸 Instagram"
+            ig_link = social_links['instagram']
+            social_info += f"  📸 Instagram: {ig_link}\n"
     
     # Content availability badge
     more_badge = ""
@@ -168,11 +170,9 @@ def format_directory_text(creator_name: str, content_directory: dict, filters: d
 
 👤 Creator: {clean_creator_name}{social_info}
 
-  📊 Statistics  
 
   🖼️ Photos: {total_pictures}
   🎬 Videos: {total_videos}
-  📅 Updated: {content_directory.get('last_updated', 'Unknown')}{more_badge}
 
 Select an option below to explore
     """

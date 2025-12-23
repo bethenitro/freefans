@@ -13,9 +13,16 @@ import asyncio
 # Import modular components
 from content_manager import ContentManager
 from user_session import UserSession
-from bot.command_handlers import start_command, help_command
+from bot.command_handlers import start_command, help_command, cancel_command
 from bot.search_handler import handle_creator_search
 from bot.callback_handlers import handle_callback_query
+from bot.admin_handlers import (
+    admin_requests_command, admin_titles_command, approve_title_command,
+    reject_title_command, bulk_approve_command, admin_stats_command
+)
+from bot.worker_handlers import (
+    handle_worker_reply, worker_stats_command, worker_help_command
+)
 from cache_manager import CacheManager
 from content_scraper import SimpleCityScraper
 
@@ -79,7 +86,44 @@ class FreeFansBot:
 
     async def handle_creator_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle creator name input and search for content."""
-        await handle_creator_search(update, context, self)
+        # Check if this is a worker reply to a video first
+        if await handle_worker_reply(update, context):
+            return
+        
+        # Check if this is a menu button or request flow
+        from bot.menu_handlers import handle_menu_button, handle_request_flow
+        
+        # Handle menu buttons
+        if await handle_menu_button(update, context, self):
+            return
+        
+        # Handle request flow (multi-step)
+        if await handle_request_flow(update, context, self):
+            return
+        
+        # Otherwise, handle as creator search (only if awaiting_request == 'search')
+        user_id = update.effective_user.id
+        if user_id in self.user_sessions:
+            session = self.user_sessions[user_id]
+            if session.awaiting_request == 'search':
+                session.awaiting_request = None  # Clear the search state
+                await handle_creator_search(update, context, self)
+            else:
+                # Not in search mode, show help
+                from bot.command_handlers import create_main_menu_keyboard
+                reply_markup = create_main_menu_keyboard()
+                await update.message.reply_text(
+                    "💡 Please use the menu buttons below to search or make a request.",
+                    reply_markup=reply_markup
+                )
+        else:
+            # No session, show help
+            from bot.command_handlers import create_main_menu_keyboard
+            reply_markup = create_main_menu_keyboard()
+            await update.message.reply_text(
+                "💡 Please use the menu buttons below to search or make a request.",
+                reply_markup=reply_markup
+            )
 
     async def handle_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle callback queries from inline keyboards."""
@@ -180,6 +224,20 @@ def main():
     application.add_handler(CommandHandler("start", bot.start))
     application.add_handler(CommandHandler("help", bot.help_command))
     application.add_handler(CommandHandler("cache", bot.cache_stats_command))
+    application.add_handler(CommandHandler("cancel", lambda update, context: cancel_command(update, context, bot)))
+    
+    # Admin commands
+    application.add_handler(CommandHandler("requests", admin_requests_command))
+    application.add_handler(CommandHandler("titles", admin_titles_command))
+    application.add_handler(CommandHandler("approve", approve_title_command))
+    application.add_handler(CommandHandler("reject", reject_title_command))
+    application.add_handler(CommandHandler("bulkapprove", bulk_approve_command))
+    application.add_handler(CommandHandler("adminstats", admin_stats_command))
+    
+    # Worker commands
+    application.add_handler(CommandHandler("mystats", worker_stats_command))
+    application.add_handler(CommandHandler("workerhelp", worker_help_command))
+    
     application.add_handler(CallbackQueryHandler(bot.handle_callback_query))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_creator_search))
     
