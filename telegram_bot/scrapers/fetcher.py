@@ -1,6 +1,6 @@
 """
 HTTP Fetcher - Handle HTTP requests with proper headers and cookies
-Enhanced with multithreading, rotating headers, and advanced rate limiting
+Enhanced with multithreading, rotating headers, advanced rate limiting, and anti-bot detection
 """
 
 import httpx
@@ -14,6 +14,7 @@ import random
 import time
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,17 @@ _http_cache_max_size = 100
 # Thread-safe lock for cache operations
 _cache_lock = threading.Lock()
 
-# Pool of different user agents to rotate
+# Anti-bot detection: Track request patterns
+_request_history = {}  # domain -> list of timestamps
+_suspicious_activity_cooldown = {}  # domain -> cooldown_until_timestamp
+_failed_request_backoff = {}  # domain -> backoff_seconds
+
+# Pool of different user agents to rotate (more variety)
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
@@ -129,13 +138,19 @@ class HTTPFetcher:
         if curl_config_path is None:
             base_dir = Path(__file__).parent.parent.parent
             curl_config_path = str(base_dir / 'shared' / 'config' / 'curl_config.txt')
+        
+        logger.info(f"🔧 Initializing HTTPFetcher")
+        logger.debug(f"   Config path: {curl_config_path}")
+        
         headers, cookies = self._load_curl_config(curl_config_path)
         self.base_headers = headers
         self.cookies = cookies
         
-        # Enhanced rate limiting settings
-        self._min_delay = 0.5  # Minimum 500ms delay
-        self._max_delay = 2.0   # Maximum 2s delay
+        logger.info(f"✅ HTTPFetcher initialized with {len(headers)} headers and {len(cookies)} cookies")
+        
+        # Enhanced rate limiting settings (increased to reduce 403 errors)
+        self._min_delay = 1.5  # Minimum 1.5s delay between requests
+        self._max_delay = 3.0   # Maximum 3s delay
         self._last_request_times = {}  # Track per-domain timing
         self._domain_locks = {}  # Per-domain locks (per event loop)
         
@@ -157,6 +172,39 @@ class HTTPFetcher:
         
         # Thread pool for CPU-intensive operations
         self._thread_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="fetcher")
+    
+    def _cleanup_old_tracking_data(self):
+        """Clean up old tracking data to prevent memory growth."""
+        global _request_history, _suspicious_activity_cooldown, _failed_request_backoff
+        
+        now = time.time()
+        cleaned_items = []
+        
+        # Clean request history older than 5 minutes
+        for domain in list(_request_history.keys()):
+            old_count = len(_request_history[domain])
+            _request_history[domain] = [t for t in _request_history[domain] if now - t < 300]
+            if not _request_history[domain]:
+                del _request_history[domain]
+                cleaned_items.append(f"{domain} (history)")
+            elif old_count > len(_request_history[domain]):
+                cleaned = old_count - len(_request_history[domain])
+                logger.debug(f"🧹 Cleaned {cleaned} old records for {domain}")
+        
+        # Clean expired cooldowns
+        for domain in list(_suspicious_activity_cooldown.keys()):
+            if now > _suspicious_activity_cooldown[domain]:
+                del _suspicious_activity_cooldown[domain]
+                cleaned_items.append(f"{domain} (expired cooldown)")
+        
+        # Clean backoff for domains with no recent history
+        for domain in list(_failed_request_backoff.keys()):
+            if domain not in _request_history or not _request_history[domain]:
+                del _failed_request_backoff[domain]
+                cleaned_items.append(f"{domain} (stale backoff)")
+        
+        if cleaned_items:
+            logger.info(f"🧹 Cleanup: Removed tracking data for {len(cleaned_items)} domains: {', '.join(cleaned_items[:3])}{' and more...' if len(cleaned_items) > 3 else ''}")
     
     def _get_domain(self, url: str) -> str:
         """Extract domain from URL for per-domain rate limiting."""
@@ -219,6 +267,17 @@ class HTTPFetcher:
             headers = _get_random_headers()
             headers.update(self.base_headers)  # Override with config headers if available
             
+            # Log header details for debugging
+            logger.info(f"🔧 Creating new HTTP client for {domain}")
+            logger.debug(f"   User-Agent: {headers.get('User-Agent', 'N/A')[:80]}")
+            logger.debug(f"   Accept: {headers.get('Accept', 'N/A')[:60]}")
+            logger.debug(f"   Accept-Language: {headers.get('Accept-Language', 'N/A')}")
+            logger.debug(f"   Total headers: {len(headers)}")
+            logger.debug(f"   Total cookies: {len(self.cookies)}")
+            if self.cookies:
+                cookie_names = list(self.cookies.keys())[:5]
+                logger.debug(f"   Cookie names (first 5): {', '.join(cookie_names)}")
+            
             self._clients[loop_id][domain] = httpx.AsyncClient(
                 timeout=30.0,
                 follow_redirects=True,
@@ -226,9 +285,135 @@ class HTTPFetcher:
                 headers=headers,
                 cookies=self.cookies
             )
-            logger.debug(f"Created new HTTP client for domain: {domain} in loop {loop_id}")
+            logger.debug(f"✓ HTTP client created for {domain} in loop {loop_id}")
             
             return self._clients[loop_id][domain]
+    
+    def _detect_suspicious_pattern(self, domain: str) -> bool:
+        """
+        Detect suspicious request patterns that might trigger anti-bot systems.
+        Returns True if pattern is suspicious and should trigger additional delays.
+        """
+        global _request_history
+        
+        now = time.time()
+        
+        # Initialize history for domain
+        if domain not in _request_history:
+            _request_history[domain] = []
+        
+        # Clean old history (keep last 60 seconds)
+        old_count = len(_request_history[domain])
+        _request_history[domain] = [t for t in _request_history[domain] if now - t < 60]
+        cleaned_count = old_count - len(_request_history[domain])
+        if cleaned_count > 0:
+            logger.debug(f"🧹 Cleaned {cleaned_count} old request records for {domain}")
+        
+        # Check request frequency
+        current_count = len(_request_history[domain])
+        if current_count > 10:  # More than 10 requests in 60 seconds
+            logger.warning(f"⚠️ High request frequency detected for {domain}: {current_count} requests in 60s")
+            return True
+        elif current_count > 5:
+            logger.info(f"📊 Request frequency for {domain}: {current_count} requests in last 60s")
+        
+        # Check for burst patterns (3+ requests within 5 seconds)
+        recent_requests = [t for t in _request_history[domain] if now - t < 5]
+        if len(recent_requests) >= 3:
+            logger.warning(f"⚠️ Burst pattern detected for {domain}: {len(recent_requests)} requests in 5s")
+            return True
+        
+        logger.debug(f"✓ Pattern check passed for {domain}: {current_count} requests/60s, {len(recent_requests)} requests/5s")
+        return False
+    
+    async def _apply_backoff_if_needed(self, domain: str):
+        """Apply exponential backoff if domain is experiencing failures."""
+        global _failed_request_backoff, _suspicious_activity_cooldown
+        
+        now = time.time()
+        
+        # Check if domain is in cooldown period
+        if domain in _suspicious_activity_cooldown:
+            cooldown_until = _suspicious_activity_cooldown[domain]
+            if now < cooldown_until:
+                wait_time = cooldown_until - now
+                logger.warning(f"🛑 Domain {domain} in cooldown, waiting {wait_time:.1f}s (cooldown until {datetime.fromtimestamp(cooldown_until).strftime('%H:%M:%S')})")
+                await asyncio.sleep(wait_time)
+                logger.info(f"✓ Cooldown expired for {domain}, resuming requests")
+                return
+            else:
+                # Cooldown expired, remove it
+                del _suspicious_activity_cooldown[domain]
+                logger.info(f"✓ Cooldown period ended for {domain}")
+        
+        # Check if domain has backoff
+        if domain in _failed_request_backoff:
+            backoff_time = _failed_request_backoff[domain]
+            logger.info(f"⏳ Applying exponential backoff of {backoff_time:.1f}s for {domain} (previous failures)")
+            await asyncio.sleep(backoff_time)
+    
+    def _update_request_metrics(self, domain: str, success: bool, status_code: Optional[int] = None):
+        """Update request metrics and adjust backoff strategies."""
+        global _request_history, _failed_request_backoff, _suspicious_activity_cooldown
+        
+        now = time.time()
+        
+        # Record request timestamp
+        if domain not in _request_history:
+            _request_history[domain] = []
+        _request_history[domain].append(now)
+        
+        # Get current stats
+        total_success = self._success_counts.get(domain, 0)
+        total_failure = self._failure_counts.get(domain, 0)
+        current_backoff = _failed_request_backoff.get(domain, 0)
+        
+        # Update success/failure counts
+        if success:
+            self._success_counts[domain] = total_success + 1
+            logger.info(f"✅ Request succeeded for {domain} (successes: {total_success + 1}, failures: {total_failure})")
+            
+            # Gradually reduce backoff on success
+            if domain in _failed_request_backoff:
+                old_backoff = _failed_request_backoff[domain]
+                _failed_request_backoff[domain] = max(0, old_backoff * 0.7)
+                new_backoff = _failed_request_backoff[domain]
+                
+                if new_backoff < 0.5:
+                    del _failed_request_backoff[domain]
+                    logger.info(f"✓ Backoff cleared for {domain} (was {old_backoff:.1f}s)")
+                else:
+                    logger.info(f"↓ Backoff reduced for {domain}: {old_backoff:.1f}s → {new_backoff:.1f}s")
+        else:
+            self._failure_counts[domain] = total_failure + 1
+            logger.warning(f"❌ Request failed for {domain} (successes: {total_success}, failures: {total_failure + 1}, status: {status_code or 'unknown'})")
+            
+            if status_code == 403:
+                # 403 = likely anti-bot detection, apply aggressive backoff
+                new_backoff = min(30, max(5, current_backoff * 2 + 5))
+                _failed_request_backoff[domain] = new_backoff
+                # Set cooldown period
+                cooldown_until = now + new_backoff
+                _suspicious_activity_cooldown[domain] = cooldown_until
+                logger.error(f"🚫 403 FORBIDDEN detected for {domain}")
+                logger.error(f"   ↑ Applying aggressive backoff: {current_backoff:.1f}s → {new_backoff:.1f}s")
+                logger.error(f"   ⏰ Cooldown until: {datetime.fromtimestamp(cooldown_until).strftime('%H:%M:%S')}")
+                
+            elif status_code == 429:
+                # 429 = rate limited, apply moderate backoff
+                new_backoff = min(60, max(10, current_backoff * 2 + 10))
+                _failed_request_backoff[domain] = new_backoff
+                cooldown_until = now + new_backoff
+                _suspicious_activity_cooldown[domain] = cooldown_until
+                logger.error(f"⏱️ 429 RATE LIMITED for {domain}")
+                logger.error(f"   ↑ Applying moderate backoff: {current_backoff:.1f}s → {new_backoff:.1f}s")
+                logger.error(f"   ⏰ Cooldown until: {datetime.fromtimestamp(cooldown_until).strftime('%H:%M:%S')}")
+                
+            else:
+                # Other failures, gentle backoff increase
+                new_backoff = min(10, current_backoff + 1)
+                _failed_request_backoff[domain] = new_backoff
+                logger.warning(f"   ↑ Gentle backoff increase: {current_backoff:.1f}s → {new_backoff:.1f}s")
     
     async def _adaptive_rate_limit(self, domain: str):
         """Apply adaptive rate limiting based on success/failure rates."""
@@ -253,22 +438,28 @@ class HTTPFetcher:
                 # Increase delay if failure rate is high
                 if failure_rate > 0.3:  # More than 30% failures
                     delay = self._max_delay
+                    logger.debug(f"⚠️ High failure rate for {domain}: {failure_rate:.1%} → using max delay {delay:.1f}s")
                 elif failure_rate > 0.1:  # More than 10% failures
                     delay = (self._min_delay + self._max_delay) / 2
+                    logger.debug(f"⚠️ Moderate failure rate for {domain}: {failure_rate:.1%} → using medium delay {delay:.1f}s")
                 else:
                     delay = self._min_delay
+                    logger.debug(f"✓ Low failure rate for {domain}: {failure_rate:.1%} → using min delay {delay:.1f}s")
             else:
                 delay = self._min_delay
+                logger.debug(f"🆕 First request to {domain} → using min delay {delay:.1f}s")
             
-            # Add random jitter to avoid synchronized requests
-            jitter = random.uniform(0.1, 0.3)
+            # Add random jitter to make requests appear more human-like (increased)
+            jitter = random.uniform(0.5, 1.5)  # 0.5-1.5 second random jitter
             total_delay = delay + jitter
             
             time_since_last = current_time - last_request
             if time_since_last < total_delay:
                 sleep_time = total_delay - time_since_last
-                logger.debug(f"Rate limiting {domain}: sleeping for {sleep_time:.2f}s")
+                logger.info(f"⏱️ Rate limiting {domain}: sleeping {sleep_time:.2f}s (base: {delay:.1f}s + jitter: {jitter:.2f}s)")
                 await asyncio.sleep(sleep_time)
+            else:
+                logger.debug(f"✓ Rate limit satisfied for {domain}: {time_since_last:.2f}s since last request")
             
             self._last_request_times[domain] = time.time()
     
@@ -290,10 +481,12 @@ class HTTPFetcher:
         try:
             config_file = Path(config_path)
             if not config_file.exists():
-                logger.warning(f"curl_config.txt not found, using default headers")
+                logger.warning(f"⚠️ curl_config.txt not found at {config_path}, using default headers")
+                logger.warning(f"   Expected path: {config_file.absolute()}")
                 return self._get_default_headers()
             
             curl_command = config_file.read_text()
+            logger.debug(f"📄 Loaded curl_config.txt ({len(curl_command)} bytes)")
             
             headers = {}
             cookies = {}
@@ -316,10 +509,14 @@ class HTTPFetcher:
                     headers[header_name] = header_value
             
             if not headers:
-                logger.warning("No headers found in curl_config.txt, using defaults")
+                logger.warning("⚠️ No headers found in curl_config.txt, using defaults")
                 return self._get_default_headers()
             
-            logger.info(f"Loaded {len(headers)} headers and {len(cookies)} cookies from {config_path}")
+            logger.info(f"✅ Loaded {len(headers)} headers and {len(cookies)} cookies from {config_path}")
+            logger.debug(f"   Headers: {', '.join(list(headers.keys())[:8])}")
+            if cookies:
+                cookie_names = list(cookies.keys())[:5]
+                logger.debug(f"   Cookies (first 5): {', '.join(cookie_names)}")
             return headers, cookies
             
         except Exception as e:
@@ -354,10 +551,26 @@ class HTTPFetcher:
         domain = self._get_domain(url)
         
         try:
+            # Periodically cleanup old tracking data
+            if random.random() < 0.1:  # 10% chance to cleanup on each request
+                self._cleanup_old_tracking_data()
+            
             # Check cache first
             cached_response = _get_cached_response(url)
             if cached_response is not None:
+                logger.debug(f"💾 Cache hit for {url[:80]}...")
                 return cached_response
+            
+            logger.info(f"🌐 Fetching {domain}: {url[:100]}...")
+            
+            # Apply backoff if domain has failures
+            await self._apply_backoff_if_needed(domain)
+            
+            # Detect suspicious request patterns
+            if self._detect_suspicious_pattern(domain):
+                additional_delay = random.uniform(2.0, 5.0)
+                logger.warning(f"⚠️ Suspicious pattern detected for {domain}, adding {additional_delay:.1f}s delay")
+                await asyncio.sleep(additional_delay)
             
             # Apply adaptive rate limiting
             await self._adaptive_rate_limit(domain)
@@ -371,60 +584,103 @@ class HTTPFetcher:
                     # Add random delay between retries
                     if attempt > 0:
                         retry_delay = random.uniform(1.0, 3.0) * attempt
-                        logger.info(f"Retry {attempt}/{retry_count} for {url} after {retry_delay:.1f}s")
+                        logger.info(f"🔄 Retry {attempt}/{retry_count} for {domain} after {retry_delay:.1f}s delay")
                         await asyncio.sleep(retry_delay)
                         
                         # Refresh headers for retry to avoid detection
                         new_headers = _get_random_headers()
                         new_headers.update(self.base_headers)
                         client.headers.update(new_headers)
+                        logger.debug(f"🔄 Refreshed headers for retry (User-Agent: {new_headers.get('User-Agent', 'N/A')[:50]}...)")
                     
                     # Check if we're in a valid event loop
                     try:
                         loop = asyncio.get_running_loop()
                         if loop.is_closed():
                             logger.warning(f"Event loop is closed for {url}, skipping request")
-                            self._record_request_result(domain, False)
+                            self._update_request_metrics(domain, False)
                             return None
                     except RuntimeError:
                         logger.warning(f"No event loop available for {url}, skipping request")
-                        self._record_request_result(domain, False)
+                        self._update_request_metrics(domain, False)
                         return None
                     
+                    logger.debug(f"📤 Sending request to {domain}...")
                     response = await client.get(url)
+                    
+                    # Log response details before raising status
+                    logger.debug(f"📥 Received response: status={response.status_code}, size={len(response.text)} bytes")
+                    
                     response.raise_for_status()
                     
                     # Success - record and cache
-                    self._record_request_result(domain, True)
                     response_text = response.text
+                    response_size = len(response_text)
+                    self._update_request_metrics(domain, True, response.status_code)
                     _cache_response(url, response_text)
                     
-                    logger.debug(f"Successfully fetched {url} (attempt {attempt + 1})")
+                    logger.info(f"✅ Successfully fetched {domain} ({response_size:,} bytes, status: {response.status_code}, attempt: {attempt + 1})")
                     return response_text
                     
                 except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 429:
-                        # Rate limited - exponential backoff
+                    status_code = e.response.status_code
+                    response_headers = dict(e.response.headers)
+                    response_text_preview = e.response.text if hasattr(e.response, 'text') else "N/A"
+                    
+                    # Log detailed error information
+                    logger.error(f"❌ HTTP {status_code} error for {url}")
+                    logger.error(f"   Response headers: {', '.join([f'{k}: {v}' for k, v in list(response_headers.items())[:8]])}")
+                    
+                    # For 403 errors, show FULL response to understand the challenge
+                    if status_code == 403 and response_text_preview != "N/A":
+                        logger.error(f"   ========== FULL 403 RESPONSE (first 2000 chars) ==========")
+                        logger.error(f"{response_text_preview[:2000]}")
+                        logger.error(f"   ========== END 403 RESPONSE ==========")
+                    elif response_text_preview != "N/A":
+                        logger.error(f"   Response preview (first 200 chars): {response_text_preview[:200]}")
+                    
+                    # Log current request headers being used (directly from client)
+                    try:
+                        actual_ua = None
+                        actual_accept = None
+                        for k, v in client.headers.items():
+                            if k.lower() == 'user-agent':
+                                actual_ua = v
+                            if k.lower() == 'accept':
+                                actual_accept = v
+                        
+                        logger.error(f"   Actual User-Agent sent: {actual_ua if actual_ua else 'MISSING!'}")
+                        logger.error(f"   Actual Accept sent: {actual_accept[:60] if actual_accept else 'MISSING!'}")
+                        logger.error(f"   Total request headers: {len(client.headers)}")
+                        logger.error(f"   Request cookies: {len(client.cookies)}")
+                        if client.cookies:
+                            cookie_names = [k for k in client.cookies.keys()][:10]
+                            logger.error(f"   Cookie names: {', '.join(cookie_names)}")
+                    except Exception as log_err:
+                        logger.error(f"   Error reading headers: {log_err}")
+                    
+                    if status_code == 429:
+                        # Rate limited - update metrics and apply backoff
+                        self._update_request_metrics(domain, False, status_code)
                         backoff_delay = min(30.0, (2 ** attempt) * 5)
                         logger.warning(f"Rate limited (429) for {url}, waiting {backoff_delay}s (attempt {attempt + 1})")
                         await asyncio.sleep(backoff_delay)
                         continue
-                    elif e.response.status_code in [403, 404]:
-                        # Don't retry on client errors
-                        logger.error(f"Client error {e.response.status_code} for {url}")
-                        self._record_request_result(domain, False)
+                    elif status_code in [403, 404]:
+                        # Don't retry on client errors - update metrics with status code
+                        self._update_request_metrics(domain, False, status_code)
                         return None
                     else:
-                        logger.warning(f"HTTP error {e.response.status_code} for {url} (attempt {attempt + 1})")
+                        logger.warning(f"HTTP error {status_code} for {url} (attempt {attempt + 1})")
                         if attempt == retry_count:
-                            self._record_request_result(domain, False)
+                            self._update_request_metrics(domain, False, status_code)
                             return None
                         continue
                         
                 except (httpx.ConnectTimeout, httpx.ReadTimeout) as e:
                     logger.warning(f"Timeout for {url} (attempt {attempt + 1}): {e}")
                     if attempt == retry_count:
-                        self._record_request_result(domain, False)
+                        self._update_request_metrics(domain, False)
                         return None
                     continue
                     
@@ -456,26 +712,26 @@ class HTTPFetcher:
                                 client = await self._get_client_for_domain(domain)
                             except Exception as client_err:
                                 logger.warning(f"Failed to recreate client for {domain}: {client_err}")
-                                self._record_request_result(domain, False)
+                                self._update_request_metrics(domain, False)
                                 return None
                             continue
                         else:
-                            self._record_request_result(domain, False)
+                            self._update_request_metrics(domain, False)
                             return None
                     else:
                         logger.warning(f"Request error for {url} (attempt {attempt + 1}): {e}")
                         if attempt == retry_count:
-                            self._record_request_result(domain, False)
+                            self._update_request_metrics(domain, False)
                             return None
                         continue
             
             # All retries failed
-            self._record_request_result(domain, False)
+            self._update_request_metrics(domain, False)
             return None
             
         except Exception as e:
             logger.error(f"Unexpected error fetching {url}: {e}")
-            self._record_request_result(domain, False)
+            self._update_request_metrics(domain, False)
             return None
     
     async def fetch_multiple_pages(self, urls: List[str], max_concurrent: int = 5) -> List[Tuple[str, Optional[str]]]:

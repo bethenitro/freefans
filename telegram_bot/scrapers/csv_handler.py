@@ -74,8 +74,10 @@ def _load_csv_to_memory(csv_path: str) -> List[dict]:
         return []
 
 
-def preload_csv_cache(csv_path: str = 'onlyfans_models.csv'):
+def preload_csv_cache(csv_path: str = None):
     """Preload CSV data into cache at startup for instant access."""
+    if csv_path is None:
+        csv_path = _DEFAULT_CSV_PATH
     try:
         data = _load_csv_to_memory(csv_path)
         logger.info(f"Preloaded {len(data)} models into CSV cache")
@@ -366,13 +368,15 @@ class SimilarityCalculator:
         return result
 
 
-def search_model_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv') -> Optional[Tuple[str, str, float]]:
+def search_model_in_csv(creator_name: str, csv_path: str = None) -> Optional[Tuple[str, str, float]]:
     """
     Search for a creator in the CSV file using advanced similarity algorithms.
     Handles multi-alias names (separated by |) by checking each alias individually.
     Uses in-memory cache for faster access.
     Returns (matched_name, url, similarity_score) or None
     """
+    if csv_path is None:
+        csv_path = _DEFAULT_CSV_PATH
     try:
         best_match = None
         best_score = 0.0
@@ -421,13 +425,15 @@ def search_model_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv'
         return None
 
 
-def search_multiple_models_in_csv(creator_name: str, csv_path: str = 'onlyfans_models.csv', max_results: int = 5) -> List[Tuple[str, str, float]]:
+def search_multiple_models_in_csv(creator_name: str, csv_path: str = None, max_results: int = 5) -> List[Tuple[str, str, float]]:
     """
     Search for multiple potential matches in the CSV file using advanced similarity.
     Handles multi-alias names (separated by |) by checking each alias individually.
     Uses in-memory cache for faster access.
     Returns list of (matched_name, url, similarity_score) tuples, sorted by similarity
     """
+    if csv_path is None:
+        csv_path = _DEFAULT_CSV_PATH
     try:
         matches = []
         calculator = SimilarityCalculator()
@@ -506,12 +512,14 @@ def _process_csv_chunk(chunk: List[dict], creator_name: str, calculator: Similar
     return matches
 
 
-async def search_multiple_models_in_csv_parallel(creator_name: str, csv_path: str = 'onlyfans_models.csv', max_results: int = 5) -> List[Tuple[str, str, float]]:
+async def search_multiple_models_in_csv_parallel(creator_name: str, csv_path: str = None, max_results: int = 5) -> List[Tuple[str, str, float]]:
     """
     Search for multiple potential matches in CSV using parallel processing.
     Much faster for large CSV files. Uses in-memory cache.
     Returns list of (matched_name, url, similarity_score) tuples, sorted by similarity
     """
+    if csv_path is None:
+        csv_path = _DEFAULT_CSV_PATH
     try:
         calculator = SimilarityCalculator()
         
@@ -563,12 +571,14 @@ async def search_multiple_models_in_csv_parallel(creator_name: str, csv_path: st
         return search_multiple_models_in_csv(creator_name, csv_path, max_results)
 
 
-async def search_csv_with_rapidfuzz(creator_name: str, csv_path: str = 'onlyfans_models.csv', max_results: int = 5) -> List[Tuple[str, str, float]]:
+async def search_csv_with_rapidfuzz(creator_name: str, csv_path: str = None, max_results: int = 5) -> List[Tuple[str, str, float]]:
     """
     Fast CSV search using rapidfuzz library.
     Provides better performance for large datasets.
     Returns list of (matched_name, url, similarity_score) tuples, sorted by similarity
     """
+    if csv_path is None:
+        csv_path = _DEFAULT_CSV_PATH
     if not RAPIDFUZZ_AVAILABLE:
         logger.warning("rapidfuzz not available, using standard search")
         return await search_multiple_models_in_csv_parallel(creator_name, csv_path, max_results)

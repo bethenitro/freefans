@@ -9,7 +9,7 @@ import time
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from managers.cache_manager import CacheManager
+from managers.dual_cache_manager import DualCacheManager
 from core.content_scraper import SimpleCityScraper
 from scrapers.csv_handler import get_all_creators_from_csv
 import random
@@ -27,7 +27,7 @@ class BackgroundScraper:
     
     def __init__(
         self, 
-        cache_manager: CacheManager,
+        cache_manager: DualCacheManager,
         scraper: SimpleCityScraper,
         refresh_interval_hours: int = 12,
         max_pages_per_creator: int = None,

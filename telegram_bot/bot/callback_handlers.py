@@ -107,7 +107,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Route to appropriate handler
     if data == "search_creator":
-        await handle_search_creator(query)
+        await handle_search_creator(query, session)
     elif data == "search_on_simpcity":
         await handle_search_on_simpcity(query, session, bot_instance)
     elif data.startswith("creator_page|"):
@@ -134,6 +134,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     elif data == "back_to_list":
         await handle_back_to_list(query, session)
     elif data == "back_to_search":
+        session.awaiting_request = 'search'
         await query.edit_message_text("🔍 Please send me the name of the creator you want to search for:")
     elif data == "view_pictures":
         await handle_view_pictures(query, session)
@@ -170,8 +171,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     elif data.startswith("of_feed_cancel_"):
         await handle_of_feed_cancel(query, session, data)
 
-async def handle_search_creator(query) -> None:
+async def handle_search_creator(query, session) -> None:
     """Handle search creator callback."""
+    # Set the session state to expect a search input
+    session.awaiting_request = 'search'
     await query.edit_message_text("🔍 Please send me the name of the creator you want to search for:")
 
 async def handle_search_on_simpcity(query, session, bot_instance) -> None:
@@ -1719,17 +1722,21 @@ async def display_of_feed_page(query, session, page: int) -> None:
     header_text += f"  📱 OnlyFans Feed 📱  \n"
     header_text += f"\n\n"
     header_text += f"Creator: @{username}\n\n"
-    header_text += f"� Showing: {start_idx + 1}-{end_idx} of {len(posts)}\n"
-    header_text += f"� Page: {page + 1} / {total_pages}\n\n"
+    header_text += f"📊 Showing: {start_idx + 1}-{end_idx} of {len(posts)}\n"
+    header_text += f"📄 Page: {page + 1} / {total_pages}\n\n"
     header_text += "⏳ Loading media..."
     
-    # Delete the old message and send new header
+    # Edit the message instead of deleting and sending new
     try:
-        await query.delete_message()
-    except:
-        pass
-    
-    await query.message.reply_text(header_text, parse_mode='Markdown')
+        await query.edit_message_text(header_text, parse_mode='Markdown')
+        message = query.message
+    except Exception as e:
+        logger.warning(f"Could not edit message, sending new one: {e}")
+        try:
+            await query.delete_message()
+        except:
+            pass
+        message = await query.message.reply_text(header_text, parse_mode='Markdown')
     
     # Headers for fetching post details
     headers = {
@@ -1944,7 +1951,7 @@ async def display_of_feed_page(query, session, page: int) -> None:
     for msg_data in message_data_list:
         if isinstance(msg_data, dict):
             message_tasks.append(
-                query.message.reply_text(
+                message.reply_text(
                     msg_data['text'],
                     disable_web_page_preview=msg_data.get('disable_web_page_preview', False)
                 )
@@ -1988,7 +1995,7 @@ async def display_of_feed_page(query, session, page: int) -> None:
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.message.reply_text(nav_text, reply_markup=reply_markup)
+    await message.reply_text(nav_text, reply_markup=reply_markup)
 
 async def handle_of_feed_page(query, session, data: str, bot_instance) -> None:
     """Handle Onlyfans Feed page navigation."""

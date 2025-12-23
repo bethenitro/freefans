@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 from managers.permissions_manager import get_permissions_manager
 from managers.request_manager import get_request_manager
 from managers.title_manager import get_title_manager
-from managers.cache_manager import CacheManager
+from managers.dual_cache_manager import DualCacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ async def approve_title_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     submission_id = context.args[0]
     title_manager = get_title_manager()
-    cache_manager = CacheManager()
+    cache_manager = DualCacheManager()
     
     # Approve the title
     submission = title_manager.approve_title(submission_id, user_id)
@@ -272,7 +272,7 @@ async def bulk_approve_command(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     title_manager = get_title_manager()
-    cache_manager = CacheManager()
+    cache_manager = DualCacheManager()
     
     # Get pending titles for this worker
     pending = title_manager.get_pending_titles(worker_id=worker_id)

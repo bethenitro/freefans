@@ -76,7 +76,13 @@ def _cache_content(url: str, start_page: int, max_pages: int, data: Dict):
 class SimpleCityScraper:
     """Main scraper class that coordinates all Fetching operations."""
     
-    def __init__(self, curl_config_path: str = 'config/curl_config.txt'):
+    def __init__(self, curl_config_path: str = None):
+        """Initialize scraper with proper path to curl_config.txt."""
+        if curl_config_path is None:
+            # Use shared/config/curl_config.txt as default
+            from pathlib import Path
+            base_dir = Path(__file__).parent.parent.parent
+            curl_config_path = str(base_dir / 'shared' / 'config' / 'curl_config.txt')
         self.fetcher = HTTPFetcher(curl_config_path)
     
     async def close(self):
@@ -137,7 +143,7 @@ class SimpleCityScraper:
     async def search_simpcity(self, creator_name: str) -> Optional[List[Dict]]:
         """
         Search for creator on SimpCity when not found in CSV.
-        Returns list of search results filtered for OnlyFans forum with >1 reply,
+        Returns list of search results filtered for OnlyFans forum or OnlyFans labeled content with >1 reply,
         ranked by fuzzy matching against the query.
         """
         try:

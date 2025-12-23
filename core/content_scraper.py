@@ -130,7 +130,7 @@ class SimpleCityScraper:
     async def search_simpcity(self, creator_name: str) -> Optional[List[Dict]]:
         """
         Search for creator on SimpCity when not found in CSV.
-        Returns list of search results filtered for OnlyFans forum with >1 reply,
+        Returns list of search results filtered for OnlyFans forum or OnlyFans labeled content with >1 reply,
         ranked by fuzzy matching against the query.
         """
         try:

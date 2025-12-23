@@ -48,7 +48,7 @@ def _clean_search_cache():
 def parse_search_results(html: str) -> List[Dict]:
     """
     Parse search results from simpcity.cr search page.
-    Filters for OnlyFans forum entries with more than 1 reply.
+    Filters for OnlyFans forum or OnlyFans labeled content with more than 1 reply.
     Uses caching to avoid re-parsing same HTML.
     
     Returns list of dicts with:
@@ -105,7 +105,7 @@ def parse_search_results(html: str) -> List[Dict]:
                 if url.startswith('/'):
                     url = f"https://simpcity.cr{url}"
                 
-                # Check if it's in OnlyFans forum
+                # Get forum information
                 minor_section = row.find('div', class_='contentRow-minor')
                 if not minor_section:
                     continue
@@ -118,8 +118,14 @@ def parse_search_results(html: str) -> List[Dict]:
                         forum_name = link.get_text(strip=True)
                         break
                 
-                # Only include OnlyFans forum results
-                if forum_name != 'OnlyFans':
+                # Check if labels include OnlyFans
+                labels = title_elem.find_all('span', class_='label')
+                has_onlyfans_label = any('OnlyFans' in label.get_text() for label in labels)
+                
+                # Include results that either:
+                # 1. Have OnlyFans label in title, OR
+                # 2. Are in the OnlyFans forum
+                if not (has_onlyfans_label or forum_name == 'OnlyFans'):
                     continue
                 
                 # Extract replies count from the minor section
@@ -159,10 +165,6 @@ def parse_search_results(html: str) -> List[Dict]:
                     if thumb_match:
                         thumbnail = thumb_match.group(1)
                 
-                # Check if labels include OnlyFans
-                labels = title_elem.find_all('span', class_='label')
-                has_onlyfans_label = any('OnlyFans' in label.get_text() for label in labels)
-                
                 # Add to results
                 results.append({
                     'title': title,
@@ -180,7 +182,7 @@ def parse_search_results(html: str) -> List[Dict]:
                 logger.error(f"Error parsing individual search result: {e}")
                 continue
         
-        logger.info(f"Parsed {len(results)} valid search results (OnlyFans forum, >1 reply)")
+        logger.info(f"Parsed {len(results)} valid search results (OnlyFans forum or OnlyFans label, >1 reply)")
         
         logger.info(f"Parsed {len(results)} search results")
         

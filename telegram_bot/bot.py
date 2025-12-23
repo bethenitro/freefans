@@ -23,7 +23,7 @@ from bot.admin_handlers import (
 from bot.worker_handlers import (
     handle_worker_reply, worker_stats_command, worker_help_command
 )
-from managers.cache_manager import CacheManager
+from managers.dual_cache_manager import DualCacheManager
 from core.content_scraper import SimpleCityScraper
 
 # Add shared directory to path for config and data access
@@ -45,7 +45,7 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 class FreeFansBot:
     """Main bot class that coordinates all bot operations."""
     
-    def __init__(self, cache_manager: CacheManager):
+    def __init__(self, cache_manager: DualCacheManager):
         self.cache_manager = cache_manager
         self.content_manager = ContentManager(cache_manager)
         self.user_sessions = {}
@@ -64,6 +64,17 @@ class FreeFansBot:
         try:
             cache_stats = self.cache_manager.get_cache_stats()
             
+            # Build database info section
+            db_info = f"• Storage: {cache_stats.get('storage_type', 'SQLite only')}\n"
+            db_info += f"• Local Size: {cache_stats['database_size_mb']} MB\n"
+            
+            if cache_stats.get('supabase_enabled', False):
+                db_info += f"• Supabase: ✅ Connected\n"
+                db_info += f"• Remote Creators: {cache_stats.get('supabase_creators', 0)}\n"
+                db_info += f"• Remote Posts: {cache_stats.get('supabase_onlyfans_posts', 0)}"
+            else:
+                db_info += "• Supabase: ❌ Disabled"
+            
             message = f"""
 📊 **Cache Statistics**
 
@@ -78,7 +89,7 @@ class FreeFansBot:
 • Cached Posts: {cache_stats['total_onlyfans_posts']}
 
 **Database Info:**
-• Size: {cache_stats['database_size_mb']} MB
+{db_info}
 
 💡 Cache updates when new queries are made
             """
@@ -190,8 +201,8 @@ def main():
         return
     
     # Initialize cache manager
-    print("💾 Initializing cache manager...")
-    cache_manager = CacheManager()
+    print("💾 Initializing dual cache manager (SQLite + Supabase)...")
+    cache_manager = DualCacheManager()
     cache_stats = cache_manager.get_cache_stats()
     print(f"✅ Cache ready: {cache_stats['total_creators']} creators, "
           f"{cache_stats['total_content_items']} items cached")

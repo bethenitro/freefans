@@ -15,5 +15,6 @@ logs.txt
 content_cache.db
 bunkr.html
 *.db
+*.png
 
 permissions_config.json
