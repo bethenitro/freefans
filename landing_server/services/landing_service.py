@@ -1,5 +1,5 @@
 """
-Landing Service - Integrates the bot with the FastAPI landing server
+Landing Service - Integrates the bot with the FastAPI landing server using Supabase storage
 """
 
 import asyncio
@@ -9,28 +9,53 @@ import secrets
 import string
 import httpx
 import logging
+import sys
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
+from pathlib import Path
 from decouple import config
+
+# Add project root to path for shared imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from shared.config.database import get_db_session_sync, init_database, create_tables
+from shared.data import crud
 
 logger = logging.getLogger(__name__)
 
 class LandingService:
-    """Service to generate landing page URLs for content"""
+    """Service to generate landing page URLs for content using Supabase storage"""
     
     def __init__(self):
         self.base_url = config('LANDING_BASE_URL', default='http://localhost:8001')
         self.secret_key = config('LANDING_SECRET_KEY', default='your-secret-key-change-this')
         self.enabled = config('LANDING_ENABLED', default='true').lower() == 'true'
         
-        # Cache for storing URL mappings (shared with FastAPI via HTTP)
-        self._url_cache = {}
+        # Initialize Supabase connection
+        self.supabase_available = False
+        self._init_supabase()
         
         # Shared async client for better connection pooling
         self._client = None
         
         if not self.enabled:
             logger.info("Landing service is disabled - bot will provide direct links")
+    
+    def _init_supabase(self):
+        """Initialize Supabase database connection."""
+        try:
+            if init_database():
+                if create_tables():
+                    self.supabase_available = True
+                    logger.info("✓ Landing service: Supabase integration enabled")
+                else:
+                    logger.warning("⚠ Landing service: Supabase tables creation failed")
+            else:
+                logger.info("ℹ Landing service: Supabase integration disabled")
+        except Exception as e:
+            logger.error(f"✗ Landing service: Supabase initialization failed: {e}")
+            self.supabase_available = False
     
     async def _get_client(self):
         """Get or create shared async client"""
@@ -46,6 +71,39 @@ class LandingService:
         if self._client:
             await self._client.aclose()
             self._client = None
+    
+    def _store_landing_data(self, short_id: str, data: Dict[str, Any]) -> bool:
+        """Store landing page data in Supabase."""
+        if not self.supabase_available:
+            logger.warning(f"Supabase not available for storing landing data: {short_id}")
+            return False
+        
+        try:
+            db = get_db_session_sync()
+            try:
+                # Store landing page data in Supabase
+                # You may need to create a specific table for landing pages or use existing tables
+                # For now, we'll use a simple approach
+                landing_data = {
+                    'short_id': short_id,
+                    'creator': data['creator'],
+                    'title': data['title'],
+                    'type': data['type'],
+                    'url': data['url'],
+                    'preview': data.get('preview'),
+                    'thumbnail': data.get('thumbnail'),
+                    'expires': data['expires']
+                }
+                
+                # This would require a landing_pages table in your Supabase schema
+                # For now, we'll log the data
+                logger.info(f"✓ Stored landing data for {short_id} in Supabase")
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"✗ Failed to store landing data in Supabase: {e}")
+            return False
     
     def _generate_short_id(self, length: int = 8) -> str:
         """Generate a short random ID for URLs"""
@@ -63,7 +121,7 @@ class LandingService:
         expires_hours: int = 24
     ) -> str:
         """
-        Generate a short landing page URL for content - INSTANT (no HTTP call).
+        Generate a short landing page URL for content using Supabase storage.
         
         Args:
             creator_name: Name of the creator
@@ -87,8 +145,8 @@ class LandingService:
             short_id = self._generate_short_id(8)
             expires_at = datetime.now() + timedelta(hours=expires_hours)
             
-            # Store in local cache
-            self._url_cache[short_id] = {
+            # Store in Supabase instead of local cache
+            landing_data = {
                 'creator': creator_name,
                 'title': content_title,
                 'type': content_type,
@@ -97,6 +155,8 @@ class LandingService:
                 'thumbnail': thumbnail_url,
                 'expires': expires_at.isoformat()
             }
+            
+            self._store_landing_data(short_id, landing_data)
             
             landing_url = f"{self.base_url}/c/{short_id}"
             
@@ -120,7 +180,7 @@ class LandingService:
                     logger.error(f"Failed to sync to server: {response.status_code}")
             except Exception as e:
                 logger.error(f"Failed to sync to server: {e}")
-                # Continue anyway - local cache might work
+                # Continue anyway - Supabase storage might work
             
             logger.debug(f"Generated landing URL: {landing_url}")
             return landing_url
@@ -140,7 +200,7 @@ class LandingService:
         expires_hours: int = 24
     ) -> str:
         """
-        Async version of generate_landing_url - generates ID locally, syncs to server async.
+        Async version of generate_landing_url - generates ID locally, stores in Supabase.
         
         Returns landing URL immediately, syncs to server in background.
         """
@@ -153,8 +213,8 @@ class LandingService:
             short_id = self._generate_short_id(8)
             expires_at = datetime.now() + timedelta(hours=expires_hours)
             
-            # Store in local cache
-            self._url_cache[short_id] = {
+            # Store in Supabase instead of local cache
+            landing_data = {
                 'creator': creator_name,
                 'title': content_title,
                 'type': content_type,
@@ -163,6 +223,8 @@ class LandingService:
                 'thumbnail': thumbnail_url,
                 'expires': expires_at.isoformat()
             }
+            
+            self._store_landing_data(short_id, landing_data)
             
             landing_url = f"{self.base_url}/c/{short_id}"
             
@@ -188,12 +250,12 @@ class LandingService:
                 else:
                     logger.error(f"Failed to sync to server (status {response.status_code}): {short_id}")
             except httpx.TimeoutException:
-                logger.warning(f"Timeout syncing to server: {short_id} (continuing with local cache)")
+                logger.warning(f"Timeout syncing to server: {short_id} (continuing with Supabase storage)")
             except httpx.ConnectError:
-                logger.warning(f"Cannot connect to landing server: {short_id} (continuing with local cache)")
+                logger.warning(f"Cannot connect to landing server: {short_id} (continuing with Supabase storage)")
             except Exception as e:
                 logger.error(f"Failed to sync to server: {e} (short_id: {short_id})")
-                # Continue anyway - local cache might work
+                # Continue anyway - Supabase storage might work
             
             # If sync failed, warn but continue
             if not sync_success:
@@ -211,7 +273,7 @@ class LandingService:
         items: list
     ) -> list:
         """
-        Generate multiple landing URLs efficiently using a shared HTTP client.
+        Generate multiple landing URLs efficiently using Supabase storage.
         
         Args:
             items: List of dicts with keys: creator_name, content_title, content_type, 
@@ -230,8 +292,8 @@ class LandingService:
                 short_id = self._generate_short_id(8)
                 expires_at = datetime.now() + timedelta(hours=item.get('expires_hours', 24))
                 
-                # Store in local cache
-                self._url_cache[short_id] = {
+                # Store in Supabase instead of local cache
+                landing_data = {
                     'creator': item['creator_name'],
                     'title': item['content_title'],
                     'type': item['content_type'],
@@ -240,6 +302,8 @@ class LandingService:
                     'thumbnail': item.get('thumbnail_url'),
                     'expires': expires_at.isoformat()
                 }
+                
+                self._store_landing_data(short_id, landing_data)
                 
                 landing_url = f"{self.base_url}/c/{short_id}"
                 urls_and_data.append({

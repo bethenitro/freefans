@@ -12,11 +12,9 @@ env/
 coomer.json
 logs.txt
 
-content_cache.db
-bunkr.html
-*.db
 *.png
 
 permissions_config.json
 
 scraper_checkpoint.json
+*.db

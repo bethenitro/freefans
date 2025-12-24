@@ -137,8 +137,6 @@ The bot requires access to:
 │   └── permissions_config.json
 └── data/
     ├── onlyfans_models.csv
-    ├── cache/
-    │   └── content_cache.db
     ├── requests/
     │   ├── creator_requests.csv
     │   └── content_requests.csv

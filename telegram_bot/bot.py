@@ -65,13 +65,11 @@ class FreeFansBot:
             cache_stats = self.cache_manager.get_cache_stats()
             
             # Build database info section
-            db_info = f"• Storage: {cache_stats.get('storage_type', 'SQLite only')}\n"
-            db_info += f"• Local Size: {cache_stats['database_size_mb']} MB\n"
+            db_info = f"• Storage: {cache_stats.get('storage_type', 'Supabase only')}\n"
+            db_info += f"• Database Size: N/A (Supabase)\n"
             
-            if cache_stats.get('supabase_enabled', False):
+            if cache_stats.get('supabase_enabled', True):
                 db_info += f"• Supabase: ✅ Connected\n"
-                db_info += f"• Remote Creators: {cache_stats.get('supabase_creators', 0)}\n"
-                db_info += f"• Remote Posts: {cache_stats.get('supabase_onlyfans_posts', 0)}"
             else:
                 db_info += "• Supabase: ❌ Disabled"
             

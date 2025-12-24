@@ -685,7 +685,7 @@ async def handle_apply_filter(query, session, data: str) -> None:
         )
 
 async def handle_download_request(query, session, data: str, bot_instance) -> None:
-    """Handle download link request for content."""
+    """Handle download link request for content with inline keyboard button."""
     content_idx = int(data.split("_")[1])
     
     if not session.current_directory or content_idx >= len(session.current_directory['items']):
@@ -711,17 +711,15 @@ async def handle_download_request(query, session, data: str, bot_instance) -> No
 📄 Content: {title}
 🎬 Type: {item.get('type', 'Unknown')}
 
-🔗 Download URL:
-{download_link}
-
 ⚠️ Important:
 • Right-click → Save As to download
 • Some links may require opening in browser
 
-💡 Tip: Copy the link above to access the content.
+💡 Tip: Use the button below to access the content.
             """
             
             keyboard = [
+                [InlineKeyboardButton("👀 Download Content", url=download_link)],
                 [InlineKeyboardButton("🔄 Generate New Link", callback_data=f"download_{content_idx}")],
                 [InlineKeyboardButton("⬅️ Back to Details", callback_data=f"content_{content_idx}")]
             ]
@@ -853,8 +851,8 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
             send_message_with_retry(
                 query.message.reply_text,
                 msg['text'],
-                parse_mode=msg.get('parse_mode', 'Markdown'),
-                disable_web_page_preview=msg.get('disable_web_page_preview', False)
+                reply_markup=msg.get('reply_markup'),
+                disable_web_page_preview=msg.get('disable_web_page_preview', True)
             )
             for msg in cached_messages
         ]
@@ -880,7 +878,7 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
         
         # Generate all landing URLs concurrently
         async def generate_picture_data(idx: int, item: dict) -> dict:
-            """Generate landing URL and message data for a picture"""
+            """Generate landing URL and message data for a picture with inline keyboard"""
             original_url = item.get('url', '')
             
             landing_url = await landing_service.generate_landing_url_async(
@@ -892,18 +890,15 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
                 thumbnail_url=original_url
             )
             
-            message_text = f"""
-🖼️ Picture #{start_idx + idx + 1}
-
-🔗 Click link below to view full image:
-{landing_url}
-
-            """
+            message_text = f"🖼️ Picture #{start_idx + idx + 1}"
+            
+            # Create inline keyboard with view button
+            keyboard = [[InlineKeyboardButton("👀 View Image", url=landing_url)]]
             
             return {
                 'text': message_text,
-                'parse_mode': 'Markdown',
-                'disable_web_page_preview': False
+                'reply_markup': InlineKeyboardMarkup(keyboard),
+                'disable_web_page_preview': True
             }
         
         # Generate all landing URLs concurrently
@@ -926,7 +921,7 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
                         send_message_with_retry(
                             query.message.reply_text,
                             msg_data['text'],
-                            parse_mode=msg_data['parse_mode'],
+                            reply_markup=msg_data.get('reply_markup'),
                             disable_web_page_preview=msg_data['disable_web_page_preview']
                         )
                     )
@@ -1168,7 +1163,7 @@ Click the button below to get the direct link.
     await query.edit_message_text(details_text, reply_markup=reply_markup)
 
 async def handle_picture_link(query, session, data: str) -> None:
-    """Show picture landing page link."""
+    """Show picture landing page link with inline keyboard button."""
     picture_idx = int(data.split("_")[2])
     
     if not session.current_directory:
@@ -1194,16 +1189,11 @@ async def handle_picture_link(query, session, data: str) -> None:
         thumbnail_url=original_url
     )
     
-    link_text = f"""
-🖼️ Picture #{picture_idx + 1}
-
-🔗 Access Link:
-{landing_url}
-
-💡 Click the link above to view the image with preview and access options.
-    """
+    link_text = f"🖼️ Picture #{picture_idx + 1}"
     
+    # Create inline keyboard with view button
     keyboard = [
+        [InlineKeyboardButton("👀 View Image", url=landing_url)],
         [InlineKeyboardButton("⬅️ Back to Picture", callback_data=f"picture_{picture_idx}")],
         [InlineKeyboardButton("📋 Back to Pictures List", callback_data="view_pictures")]
     ]
@@ -1245,6 +1235,7 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
             send_message_with_retry(
                 query.message.reply_text,
                 msg['text'],
+                reply_markup=msg.get('reply_markup'),
                 disable_web_page_preview=msg.get('disable_web_page_preview', False)
             )
             for msg in cached_messages
@@ -1293,7 +1284,7 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
         
         # Step 2: Generate all landing URLs concurrently
         async def generate_landing_data(idx: int, item: dict, preview_url: Optional[str]) -> dict:
-            """Generate landing URL and prepare message data"""
+            """Generate landing URL and prepare message data with inline keyboard"""
             from managers.permissions_manager import get_permissions_manager
             
             original_url = item.get('url', '')
@@ -1313,23 +1304,21 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
             user_id = query.from_user.id
             is_worker = permissions.is_worker(user_id)
             
+            # Create message text without links
+            message_text = f"🎬 {title}"
+            
+            # Create inline keyboard with buttons
+            keyboard = []
+            keyboard.append([InlineKeyboardButton("👀 View Video", url=landing_url)])
+            
             if is_worker:
-                # Workers see both landing and original URL
-                message_text = f"""🎬 {title}
-
-🔗 Access Link: {landing_url}
-📎 Original: {original_url}
-"""
-            else:
-                # Regular users only see landing URL
-                message_text = f"""🎬 {title}
-
-🔗 Access Link: {landing_url}
-"""
+                # Workers get additional button for original URL
+                keyboard.append([InlineKeyboardButton("🔗 Original Link", url=original_url)])
             
             return {
                 'text': message_text,
-                'disable_web_page_preview': False,
+                'disable_web_page_preview': True,
+                'reply_markup': InlineKeyboardMarkup(keyboard),
                 'original_url': original_url  # Store for potential worker use
             }
         
@@ -1353,6 +1342,7 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
                         send_message_with_retry(
                             query.message.reply_text,
                             msg_data['text'],
+                            reply_markup=msg_data.get('reply_markup'),
                             disable_web_page_preview=msg_data['disable_web_page_preview']
                         )
                     )
@@ -1649,15 +1639,14 @@ async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> No
                 
                 if response.status_code == 403:
                     # Try alternative approach: provide direct link and explain
+                    keyboard = [[InlineKeyboardButton("👀 View Feed Manually", url=f"https://coomer.st/onlyfans/user/{username}")]]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
                     await query.edit_message_text(
                         f"⚠️ Access Currently Unavailable\n\n"
                         f"The archive database is currently blocking automated requests for @{username}.\n\n"
-                        f"View Feed Manually:\n"
-                        f"You can browse the archived OnlyFans feed directly by opening this link in your browser:\n\n"
-                        f"🔗 `https://coomer.st/onlyfans/user/{username}`\n\n"
-                        f"💡 Note: The link provides access to all archived posts, photos, and videos from this creator's OnlyFans.",
-                        parse_mode='Markdown',
-                        disable_web_page_preview=False
+                        f"💡 Note: The button below provides access to all archived posts, photos, and videos from this creator's OnlyFans.",
+                        reply_markup=reply_markup
                     )
                     return
                 
@@ -1877,7 +1866,7 @@ async def display_of_feed_page(query, session, page: int) -> None:
     
     # Generate landing URLs for all media items concurrently
     async def generate_landing_for_media(post_idx: int, caption: str, media_type: str, media_url: str) -> dict:
-        """Generate landing URL for a media item"""
+        """Generate landing URL for a media item with inline keyboard"""
         try:
             # Extract post number from caption if available
             post_match = re.search(r'Post #(\d+)', caption) if caption else None
@@ -1896,32 +1885,40 @@ async def display_of_feed_page(query, session, page: int) -> None:
                 thumbnail_url=media_url if media_type == 'photo' else None
             )
             
-            # Format message based on media type
+            # Format message without links
             media_label = "Image Post" if media_type == 'photo' else "Video Post"
             media_icon = "🖼️" if media_type == 'photo' else "🎬"
             
             if caption:
-                message_text = f"{caption}\n\n{media_icon} {media_label}:\n{landing_url}"
+                message_text = f"{caption}\n\n{media_icon} {media_label}"
             else:
-                message_text = f"{media_icon} {media_label}:\n{landing_url}"
+                message_text = f"{media_icon} {media_label}"
+            
+            # Create inline keyboard with view button
+            keyboard = [[InlineKeyboardButton("👀 View Content", url=landing_url)]]
             
             return {
                 'text': message_text,
-                'disable_web_page_preview': False
+                'disable_web_page_preview': True,
+                'reply_markup': InlineKeyboardMarkup(keyboard)
             }
         except Exception as e:
             logger.error(f"Error generating landing URL for OF post: {e}")
-            # Fallback to direct URL
+            # Fallback to direct URL button
             media_label = "Image Post" if media_type == 'photo' else "Video Post"
             media_icon = "🖼️" if media_type == 'photo' else "🎬"
             
             if caption:
-                message_text = f"{caption}\n\n{media_icon} {media_label}:\n{media_url}"
+                message_text = f"{caption}\n\n{media_icon} {media_label}"
             else:
-                message_text = f"{media_icon} {media_label}:\n{media_url}"
+                message_text = f"{media_icon} {media_label}"
+            
+            keyboard = [[InlineKeyboardButton("👀 View Content", url=media_url)]]
+            
             return {
                 'text': message_text,
-                'disable_web_page_preview': False
+                'disable_web_page_preview': True,
+                'reply_markup': InlineKeyboardMarkup(keyboard)
             }
     
     # Prepare all landing URL generation tasks
@@ -1942,7 +1939,11 @@ async def display_of_feed_page(query, session, page: int) -> None:
         else:
             # No media, create a simple async task that returns text-only message data
             async def create_text_only_message(text):
-                return {'text': f"{text}\n\n💬 Text-only post", 'disable_web_page_preview': False}
+                return {
+                    'text': f"{text}\n\n💬 Text-only post", 
+                    'disable_web_page_preview': True,
+                    'reply_markup': None
+                }
             
             landing_tasks.append(create_text_only_message(caption))
     
@@ -1956,7 +1957,8 @@ async def display_of_feed_page(query, session, page: int) -> None:
             message_tasks.append(
                 message.reply_text(
                     msg_data['text'],
-                    disable_web_page_preview=msg_data.get('disable_web_page_preview', False)
+                    reply_markup=msg_data.get('reply_markup'),
+                    disable_web_page_preview=msg_data.get('disable_web_page_preview', True)
                 )
             )
     

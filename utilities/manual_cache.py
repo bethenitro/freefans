@@ -20,7 +20,7 @@ from pathlib import Path
 # Add telegram_bot to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / 'telegram_bot'))
 
-from managers.dual_cache_manager import DualCacheManager
+from managers.cache_factory import get_cache_manager
 from core.content_scraper import SimpleCityScraper
 from scrapers.background_scraper import BackgroundScraper
 from scrapers.csv_handler import get_all_creators_from_csv, preload_csv_cache
@@ -37,12 +37,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Set all loggers to ERROR level to minimize log output
+# Set most loggers to ERROR level to minimize log output, but keep cache manager at INFO
 logging.getLogger('httpx').setLevel(logging.ERROR)
 logging.getLogger('asyncio').setLevel(logging.ERROR)
 logging.getLogger('scrapers.fetcher').setLevel(logging.ERROR)
 logging.getLogger('scrapers.parsers').setLevel(logging.ERROR)
-logging.getLogger('managers.dual_cache_manager').setLevel(logging.ERROR)
+logging.getLogger('managers.cache_factory').setLevel(logging.INFO)  # Keep cache manager at INFO to see operations
 logging.getLogger('core.content_scraper').setLevel(logging.ERROR)
 
 
@@ -53,18 +53,24 @@ class ManualCacheManager:
         """Initialize the manual cache manager."""
         print("🔧 Initializing Manual Cache Manager...")
         
-        # Initialize dual cache manager (stores to both SQLite and Supabase)
-        self.cache_manager = DualCacheManager()
+        # Initialize cache manager using factory (will use Supabase-only based on config)
+        self.cache_manager = get_cache_manager()
         
-        # Test Supabase connection
+        # Test Supabase connection and sync capability
         print("🔗 Testing Supabase connection...")
         try:
-            # Try to get cache stats to test both SQLite and Supabase connections
-            stats = self.cache_manager.get_cache_stats()
-            print("✅ Supabase connection successful")
+            # Check if Supabase is available
+            if hasattr(self.cache_manager, 'is_supabase_available') and self.cache_manager.is_supabase_available():
+                print("✅ Supabase connection successful")
+                
+                # Test a small operation to verify it's working
+                test_stats = self.cache_manager.get_cache_stats()
+                print(f"✅ Supabase operations verified - {test_stats.get('total_creators', 0)} creators in cache")
+            else:
+                print("⚠️  Supabase is not available - check configuration")
         except Exception as e:
-            print(f"⚠️  Supabase connection issue: {e}")
-            print("   Continuing with local SQLite only...")
+            print(f"⚠️  Supabase connection test failed: {e}")
+            print("   Check your Supabase configuration in .env file")
         
         # Initialize scraper
         self.scraper = SimpleCityScraper()
@@ -86,11 +92,25 @@ class ManualCacheManager:
             concurrent_requests=concurrent_requests
         )
         
-        print(f"✅ Manual Cache Manager initialized with dual storage (SQLite + Supabase)")
+        print(f"✅ Manual Cache Manager initialized")
         print(f"   • Max workers: {max_workers}")
         print(f"   • Batch size: {batch_size}")
         print(f"   • Concurrent requests: {concurrent_requests}")
-        print(f"   • Storage: Local SQLite + Remote Supabase")
+        print(f"   • Storage: {self.cache_manager.get_cache_stats().get('storage_type', 'Unknown')}")
+        
+        # Check if Supabase is available
+        supabase_status = "✅ Active" if (hasattr(self.cache_manager, 'is_supabase_available') and 
+                                        self.cache_manager.is_supabase_available()) else "❌ Disabled"
+        print(f"   • Supabase: {supabase_status}")
+        
+        # Cleanup empty creators on initialization
+        if hasattr(self.cache_manager, 'cleanup_empty_creators'):
+            print("🧹 Cleaning up empty creators...")
+            cleaned = self.cache_manager.cleanup_empty_creators()
+            if cleaned > 0:
+                print(f"✅ Cleaned up {cleaned} empty creators from database")
+            else:
+                print("✅ No empty creators found to clean up")
     
     async def cache_all_creators(self, max_creators=None):
         """
@@ -184,8 +204,8 @@ class ManualCacheManager:
             print(f"   • Content items: {stats['total_content_items']}")
             print(f"   • Preview images: {stats['total_preview_images']}")
             print(f"   • Video links: {stats['total_video_links']}")
-            print(f"   • Database size: {stats['database_size_mb']} MB")
-            print(f"   • Storage: Local SQLite + Remote Supabase")
+            print(f"   • Database size: {stats.get('database_size_mb', 0)} MB")
+            print(f"   • Storage: {stats.get('storage_type', 'Unknown')}")
             
         except Exception as e:
             logger.error(f"Error during manual caching: {e}", exc_info=True)
@@ -193,7 +213,7 @@ class ManualCacheManager:
     
     async def cache_uncached_creators_only(self, max_creators=None):
         """
-        Cache only creators that are not already cached.
+        Cache only creators that are not already cached using optimized database queries.
         
         Args:
             max_creators: Maximum number of creators to cache (None for all)
@@ -203,25 +223,17 @@ class ManualCacheManager:
         
         try:
             # Get all creators from CSV
+            print("📂 Loading creators from CSV...")
             all_creators = get_all_creators_from_csv(max_results=max_creators)
+            print(f"📂 Loaded {len(all_creators)} creators from CSV")
+            
             if not all_creators:
                 print("❌ No creators found in CSV")
                 return
             
-            # Get already cached creators
-            cached_creators = self.cache_manager.get_all_cached_creators()
-            cached_names = {creator['name'].lower() for creator in cached_creators}
-            
-            # Filter to uncached creators only
-            uncached_creators = [
-                creator for creator in all_creators 
-                if creator['name'].lower() not in cached_names
-            ]
-            
-            print(f"📊 Cache analysis:")
-            print(f"   • Total creators in CSV: {len(all_creators)}")
-            print(f"   • Already cached: {len(cached_names)}")
-            print(f"   • Uncached (to process): {len(uncached_creators)}")
+            # Use optimized method to get uncached creators
+            print("🚀 Using optimized database queries for comparison...")
+            uncached_creators = self.cache_manager.get_uncached_creators_optimized(all_creators)
             
             if not uncached_creators:
                 print("✅ All creators are already cached!")
@@ -316,8 +328,8 @@ class ManualCacheManager:
             print(f"   • Content items: {stats['total_content_items']}")
             print(f"   • Preview images: {stats['total_preview_images']}")
             print(f"   • Video links: {stats['total_video_links']}")
-            print(f"   • Database size: {stats['database_size_mb']} MB")
-            print(f"   • Storage: Local SQLite + Remote Supabase")
+            print(f"   • Database size: {stats.get('database_size_mb', 0)} MB")
+            print(f"   • Storage: {stats.get('storage_type', 'Unknown')}")
             
         except Exception as e:
             logger.error(f"Error during uncached-only caching: {e}", exc_info=True)
@@ -398,8 +410,8 @@ class ManualCacheManager:
             print(f"\n🎉 Manual stale creator refresh complete!")
             print(f"   • Total cached creators: {stats['total_creators']}")
             print(f"   • Content items: {stats['total_content_items']}")
-            print(f"   • Database size: {stats['database_size_mb']} MB")
-            print(f"   • Storage: Local SQLite + Remote Supabase")
+            print(f"   • Database size: {stats.get('database_size_mb', 0)} MB")
+            print(f"   • Storage: {stats.get('storage_type', 'Unknown')}")
             
         except Exception as e:
             logger.error(f"Error during stale creator refresh: {e}", exc_info=True)
@@ -418,8 +430,8 @@ class ManualCacheManager:
             print(f"   • Video links: {stats['total_video_links']}")
             print(f"   • OnlyFans users: {stats['total_onlyfans_users']}")
             print(f"   • OnlyFans posts: {stats['total_onlyfans_posts']}")
-            print(f"   • Database size: {stats['database_size_mb']} MB")
-            print(f"   • Storage: Local SQLite + Remote Supabase")
+            print(f"   • Database size: {stats.get('database_size_mb', 0)} MB")
+            print(f"   • Storage: {stats.get('storage_type', 'Unknown')}")
             
             # Show some recent creators
             recent_creators = self.cache_manager.get_all_cached_creators()[:10]

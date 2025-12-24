@@ -2,13 +2,11 @@
 """
 Cache Manager Factory
 
-Provides the appropriate cache manager based on the CACHE_STORAGE_MODE environment variable.
+Provides Supabase-only cache manager for the application.
 """
 
 import os
 from decouple import config
-from .cache_manager import CacheManager
-from .dual_cache_manager import DualCacheManager
 
 
 def get_cache_manager():
@@ -16,54 +14,83 @@ def get_cache_manager():
     Factory function to get the appropriate cache manager based on configuration.
     
     Returns:
-        CacheManager or DualCacheManager: The appropriate cache manager instance
+        SupabaseCacheManager: Supabase-only cache manager instance
     """
-    cache_mode = config('CACHE_STORAGE_MODE', default='BOTH').upper()
-    
-    if cache_mode == 'LOCAL':
-        print("💾 Using LOCAL cache storage (SQLite only)")
-        return CacheManager()
-    elif cache_mode == 'SUPABASE':
-        print("☁️  Using SUPABASE cache storage (PostgreSQL only)")
-        return SupabaseCacheManager()
-    elif cache_mode == 'BOTH':
-        print("🔄 Using DUAL cache storage (SQLite + Supabase)")
-        return DualCacheManager()
-    else:
-        print(f"⚠️  Unknown cache mode '{cache_mode}', defaulting to DUAL storage")
-        return DualCacheManager()
+    print("☁️  Using SUPABASE cache storage (PostgreSQL only)")
+    return SupabaseCacheManager()
 
 
-class SupabaseCacheManager(DualCacheManager):
+class SupabaseCacheManager:
     """
     Supabase-only cache manager that only uses PostgreSQL storage.
-    Inherits from DualCacheManager but overrides methods to skip SQLite operations.
+    No SQLite dependency - pure Supabase implementation.
     """
     
     def __init__(self):
         """Initialize Supabase-only cache manager."""
-        # Initialize the parent but we'll override the methods
-        super().__init__()
+        import sys
+        from pathlib import Path
+        
+        # Add project root to path for shared imports
+        project_root = Path(__file__).parent.parent.parent
+        sys.path.insert(0, str(project_root))
+        
+        from shared.config.database import init_database, create_tables, is_database_available
+        
+        self.supabase_available = False
+        self._init_supabase()
         print("☁️  Supabase-only cache manager initialized")
+    
+    def _init_supabase(self):
+        """Initialize Supabase database connection."""
+        import logging
+        from shared.config.database import init_database, create_tables
+        
+        logger = logging.getLogger(__name__)
+        
+        try:
+            if init_database():
+                if create_tables():
+                    self.supabase_available = True
+                    logger.info("✓ Supabase integration enabled")
+                else:
+                    logger.warning("⚠ Supabase tables creation failed")
+            else:
+                logger.info("ℹ Supabase integration disabled")
+        except Exception as e:
+            logger.error(f"✗ Supabase initialization failed: {e}")
+            self.supabase_available = False
     
     def save_creator_cache(self, creator_name: str, url: str, content_data: dict, 
                           post_count: int = 0, preview_images: list = None, 
                           video_links: list = None) -> bool:
         """Save creator cache to Supabase only."""
         try:
-            # Only save to Supabase, skip SQLite
             if not self.supabase_available:
                 print(f"❌ Supabase not available for saving {creator_name}")
                 return False
             
-            self._sync_to_supabase('save_creator_cache', 
-                                 creator_name=creator_name, 
-                                 url=url, 
-                                 content_data=content_data, 
-                                 post_count=post_count,
-                                 preview_images=preview_images or [],
-                                 video_links=video_links or [])
-            return True
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            import logging
+            
+            logger = logging.getLogger(__name__)
+            
+            db = get_db_session_sync()
+            try:
+                result = crud.update_creator_content(db, creator_name, content_data)
+                item_count = len(content_data.get('items', [])) if content_data else 0
+                
+                if result is None:
+                    # Creator was skipped due to 0 items or deleted
+                    if item_count == 0:
+                        logger.info(f"⏭️  Skipped creator {creator_name} - no content items")
+                    return False  # Indicate that nothing was saved
+                else:
+                    logger.info(f"✓ Saved creator {creator_name} to Supabase ({item_count} items)")
+                    return True
+            finally:
+                db.close()
         except Exception as e:
             print(f"❌ Error saving to Supabase: {e}")
             return False
@@ -71,14 +98,24 @@ class SupabaseCacheManager(DualCacheManager):
     def get_creator_cache(self, creator_name: str, max_age_hours: int = 24) -> dict:
         """Get creator cache from Supabase only."""
         try:
-            # Only get from Supabase, skip SQLite
             if not self.supabase_available:
                 print(f"❌ Supabase not available for getting {creator_name}")
                 return None
             
-            return self._get_from_supabase('get_creator_cache', 
-                                         creator_name=creator_name, 
-                                         max_age_hours=max_age_hours)
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            import logging
+            
+            logger = logging.getLogger(__name__)
+            
+            db = get_db_session_sync()
+            try:
+                result = crud.get_creator_content(db, creator_name, max_age_hours)
+                if result:
+                    logger.info(f"✓ Retrieved creator {creator_name} from Supabase")
+                return result
+            finally:
+                db.close()
         except Exception as e:
             print(f"❌ Error getting from Supabase: {e}")
             return None
@@ -86,15 +123,24 @@ class SupabaseCacheManager(DualCacheManager):
     def save_onlyfans_posts(self, username: str, posts: list) -> bool:
         """Save OnlyFans posts to Supabase only."""
         try:
-            # Only save to Supabase, skip SQLite
             if not self.supabase_available:
                 print(f"❌ Supabase not available for saving OnlyFans posts for {username}")
                 return False
             
-            self._sync_to_supabase('save_onlyfans_posts', 
-                                 username=username, 
-                                 posts=posts)
-            return True
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            import logging
+            
+            logger = logging.getLogger(__name__)
+            
+            db = get_db_session_sync()
+            try:
+                crud.save_onlyfans_posts(db, username, posts)
+                post_count = len(posts) if posts else 0
+                logger.info(f"✓ Saved OnlyFans posts for {username} to Supabase ({post_count} posts)")
+                return True
+            finally:
+                db.close()
         except Exception as e:
             print(f"❌ Error saving OnlyFans posts to Supabase: {e}")
             return False
@@ -102,15 +148,24 @@ class SupabaseCacheManager(DualCacheManager):
     def get_onlyfans_posts(self, username: str, max_age_hours: int = 24) -> list:
         """Get OnlyFans posts from Supabase only."""
         try:
-            # Only get from Supabase, skip SQLite
             if not self.supabase_available:
                 print(f"❌ Supabase not available for getting OnlyFans posts for {username}")
                 return []
             
-            result = self._get_from_supabase('get_onlyfans_posts', 
-                                           username=username, 
-                                           max_age_hours=max_age_hours)
-            return result if result is not None else []
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            import logging
+            
+            logger = logging.getLogger(__name__)
+            
+            db = get_db_session_sync()
+            try:
+                result = crud.get_onlyfans_posts(db, username, max_age_hours)
+                if result:
+                    logger.info(f"✓ Retrieved OnlyFans posts for {username} from Supabase")
+                return result if result is not None else []
+            finally:
+                db.close()
         except Exception as e:
             print(f"❌ Error getting OnlyFans posts from Supabase: {e}")
             return []
@@ -164,4 +219,213 @@ class SupabaseCacheManager(DualCacheManager):
                 'database_size_mb': 0.0,
                 'supabase_enabled': False,
                 'storage_type': 'Supabase only (error)'
-            }
+            }    
+
+    def get_all_cached_creators(self) -> list:
+        """Get list of all cached creators from Supabase."""
+        try:
+            if not self.supabase_available:
+                return []
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            
+            db = get_db_session_sync()
+            try:
+                creators = crud.get_all_creators(db)
+                # Convert Creator objects to dictionaries
+                return [
+                    {
+                        'name': creator.name,
+                        'url': f"https://simpcity.su/threads/{creator.name.lower().replace(' ', '-')}.123456/",  # Placeholder URL
+                        'last_scraped': creator.last_scraped.isoformat() if creator.last_scraped else None,
+                        'item_count': creator.post_count or 0
+                    }
+                    for creator in creators
+                ]
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"❌ Error getting creators from Supabase: {e}")
+            return []
+    
+    def get_cached_creator_names_optimized(self) -> set:
+        """Get set of cached creator names using optimized query (names only)."""
+        try:
+            if not self.supabase_available:
+                return set()
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            
+            db = get_db_session_sync()
+            try:
+                return crud.get_cached_creator_names(db)
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"❌ Error getting cached creator names: {e}")
+            return set()
+    
+    def get_uncached_creators_optimized(self, csv_creators: list, batch_size: int = 500) -> list:
+        """
+        Get uncached creators using optimized batched queries.
+        
+        Args:
+            csv_creators: List of creator dicts with 'name' and 'url' keys
+            batch_size: Batch size for database queries
+            
+        Returns:
+            List of uncached creator dicts
+        """
+        try:
+            if not self.supabase_available or not csv_creators:
+                return csv_creators
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            
+            # Extract creator names from CSV
+            creator_names = [creator['name'] for creator in csv_creators]
+            
+            db = get_db_session_sync()
+            try:
+                # Use batched IN queries to get existing names
+                existing_names = crud.get_cached_creator_names_batched(db, creator_names, batch_size)
+                
+                # Filter to uncached creators using set comparison (O(1) lookup)
+                uncached_creators = [
+                    creator for creator in csv_creators 
+                    if creator['name'].lower() not in existing_names
+                ]
+                
+                print(f"📊 Optimization results:")
+                print(f"   • Total CSV creators: {len(csv_creators)}")
+                print(f"   • Already cached: {len(existing_names)}")
+                print(f"   • Uncached (to process): {len(uncached_creators)}")
+                
+                return uncached_creators
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            print(f"❌ Error in optimized uncached creator lookup: {e}")
+            # Fallback to original method
+            return csv_creators
+    
+    def delete_creator_cache(self, creator_name: str) -> bool:
+        """Delete creator cache from Supabase."""
+        try:
+            if not self.supabase_available:
+                return False
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            import logging
+            
+            logger = logging.getLogger(__name__)
+            
+            db = get_db_session_sync()
+            try:
+                crud.delete_creator(db, creator_name)
+                logger.info(f"✓ Deleted creator {creator_name} from Supabase")
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"❌ Error deleting creator from Supabase: {e}")
+            return False
+    
+    def update_video_title(self, video_url: str, new_title: str) -> bool:
+        """Update video title in Supabase."""
+        try:
+            if not self.supabase_available:
+                return False
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            import logging
+            
+            logger = logging.getLogger(__name__)
+            
+            db = get_db_session_sync()
+            try:
+                result = crud.update_video_title(db, video_url, new_title)
+                if result:
+                    logger.info(f"✓ Updated video title in Supabase: {video_url}")
+                return result
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"❌ Error updating video title in Supabase: {e}")
+            return False
+    
+    def is_supabase_available(self) -> bool:
+        """Check if Supabase integration is available."""
+        from shared.config.database import is_database_available
+        return self.supabase_available and is_database_available()
+    
+    def get_onlyfans_usernames(self) -> list:
+        """Get list of all OnlyFans usernames from Supabase."""
+        try:
+            if not self.supabase_available:
+                return []
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            
+            db = get_db_session_sync()
+            try:
+                return crud.get_onlyfans_usernames(db)
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"❌ Error getting OnlyFans usernames from Supabase: {e}")
+            return []
+    
+    def get_stale_creators(self, max_age_hours: int = 24) -> list:
+        """Get list of creators that need to be refreshed from Supabase."""
+        try:
+            if not self.supabase_available:
+                return []
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            
+            db = get_db_session_sync()
+            try:
+                creators = crud.get_stale_creators(db, max_age_hours)
+                # Convert Creator objects to dictionaries
+                return [
+                    {
+                        'name': creator.name,
+                        'url': f"https://simpcity.su/threads/{creator.name.lower().replace(' ', '-')}.123456/",  # Placeholder URL
+                        'last_scraped': creator.last_scraped.isoformat() if creator.last_scraped else None,
+                        'item_count': creator.post_count or 0
+                    }
+                    for creator in creators
+                ]
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"❌ Error getting stale creators from Supabase: {e}")
+            return []
+    
+    def cleanup_empty_creators(self) -> int:
+        """Remove creators with 0 items from Supabase database."""
+        try:
+            if not self.supabase_available:
+                return 0
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            
+            db = get_db_session_sync()
+            try:
+                return crud.cleanup_empty_creators(db)
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"❌ Error cleaning up empty creators: {e}")
+            return 0

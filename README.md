@@ -36,10 +36,8 @@ FreeFans/
     │   ├── content_domains.txt
     │   ├── video_domains.txt
     │   └── permissions_config.json
-    └── data/            # Shared data storage
+    └── data/            # CSV data files
         ├── onlyfans_models.csv
-        ├── cache/
-        │   └── content_cache.db
         ├── requests/
         │   ├── creator_requests.csv
         │   └── content_requests.csv
@@ -47,6 +45,23 @@ FreeFans/
             ├── pending_titles.csv
             ├── approved_titles.csv
             └── rejected_titles.csv
+```
+
+## 🗄️ Storage Architecture
+
+The project uses **Supabase (PostgreSQL)** for all data storage:
+
+- **Creator Content Cache**: Stores scraped content metadata
+- **OnlyFans Posts**: Caches OnlyFans feed data  
+- **User Permissions**: Admin and worker user management
+- **Landing Page Data**: Short URL mappings
+- **Scraper Checkpoints**: Progress tracking for scrapers
+
+### Key Benefits
+- ☁️ **Cloud-native**: No local database files
+- 🔄 **Real-time sync**: Instant data consistency
+- 📈 **Scalable**: PostgreSQL performance
+- 🔒 **Secure**: Supabase authentication and RLS
 ```
 
 ## Deployment Architectures
@@ -67,8 +82,8 @@ FreeFans/
 │  └────────────────────┘    │
 │           │                 │
 │  ┌────────▼───────────┐    │
-│  │  Shared Storage    │    │
-│  │  (Local Disk)      │    │
+│  │  Supabase DB       │    │
+│  │  (Cloud)           │    │
 │  └────────────────────┘    │
 └─────────────────────────────┘
 ```
@@ -119,9 +134,9 @@ cd landing_server && uvicorn services.fastapi_server:app --host 0.0.0.0 --port 8
          │
          ▼
 ┌──────────────────┐
-│  Shared Storage  │
-│  NFS / S3 / DB   │
-│  (Centralized)   │
+│  Supabase DB     │
+│  (Cloud)         │
+│  PostgreSQL      │
 └──────────────────┘
 ```
 
@@ -135,21 +150,17 @@ python -m venv env
 source env/bin/activate
 pip install -r requirements.txt
 
-# Configure for remote landing server
+# Configure for remote landing server and Supabase
 cat > .env << EOF
 TELEGRAM_BOT_TOKEN=your_bot_token
 LANDING_BASE_URL=https://landing.yourdomain.com
 LANDING_SECRET_KEY=shared_secret_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
 EOF
 
-# Mount shared storage (if using network storage)
-# Option A: NFS
-sudo mount -t nfs storage-server:/path/to/shared /path/to/FreeFans/shared
-
-# Option B: rsync periodically
-rsync -av storage-server:/path/to/shared/ /path/to/FreeFans/shared/
-
 # Run bot
+python bot.py
 python bot.py
 ```
 
@@ -225,6 +236,8 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 LANDING_BASE_URL=http://localhost:8001  # Or your landing server URL
 LANDING_SECRET_KEY=change-this-secret-key
 LANDING_ENABLED=true
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_KEY=your_supabase_anon_key
 ```
 
 **Landing Server (.env):**
@@ -234,27 +247,17 @@ LANDING_PORT=8001
 LANDING_BASE_URL=http://localhost:8001  # Or your public domain
 LANDING_SECRET_KEY=change-this-secret-key
 LANDING_ENABLED=true
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_KEY=your_supabase_anon_key
 ```
 
-### 3. Shared Directory Setup
+### 3. Initialize Supabase Database
 
-The `shared/` directory contains config and data needed by the bot:
-
-**Same Server:**
 ```bash
-# Already in correct location: ../shared/ relative to telegram_bot/
-```
+cd telegram_bot
 
-**Different Servers:**
-```bash
-# Option A: Network mount (NFS)
-sudo mount -t nfs storage-server:/shared /path/to/telegram_bot/../shared
-
-# Option B: Periodic sync (cron)
-*/5 * * * * rsync -av storage-server:/shared/ /path/to/telegram_bot/../shared/
-
-# Option C: Cloud storage (S3, etc.)
-# Modify code to use cloud storage SDK
+# Initialize Supabase database schema
+python ../scripts/init_supabase.py
 ```
 
 ### 4. Initialize Data
@@ -264,9 +267,6 @@ cd telegram_bot
 
 # Add yourself as admin
 python scripts/manage_permissions.py add-admin YOUR_TELEGRAM_USER_ID
-
-# Optional: Pre-populate cache
-python scripts/manual_cache.py
 ```
 
 ### 5. Start Services
@@ -386,8 +386,13 @@ tar -czf backup-$(date +%Y%m%d).tar.gz shared/
 
 ### Database
 ```bash
-# SQLite backup
-sqlite3 shared/data/cache/content_cache.db ".backup shared/data/cache/backup.db"
+# Supabase backup (via Supabase Dashboard)
+# 1. Go to your Supabase project dashboard
+# 2. Navigate to Settings > Database
+# 3. Use the backup/restore functionality
+# 4. Or use pg_dump for manual backups:
+
+pg_dump "postgresql://user:pass@host:port/dbname" > backup.sql
 ```
 
 ## Troubleshooting

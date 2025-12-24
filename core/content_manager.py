@@ -7,16 +7,16 @@ from typing import Dict, List, Optional
 import logging
 from datetime import datetime, timedelta
 from core.content_scraper import SimpleCityScraper
-from managers.dual_cache_manager import DualCacheManager
+from managers.cache_factory import get_cache_manager
 from services.landing_service import landing_service
 
 logger = logging.getLogger(__name__)
 
 class ContentManager:
-    def __init__(self, cache_manager: Optional[DualCacheManager] = None):
+    def __init__(self, cache_manager = None):
         self.cache = {}
         self.scraper = SimpleCityScraper()
-        self.cache_manager = cache_manager or DualCacheManager()
+        self.cache_manager = cache_manager or get_cache_manager()
         self.search_providers = []  # Will be populated with search providers later
     
     async def search_creator_options(self, creator_name: str) -> Optional[Dict]:
