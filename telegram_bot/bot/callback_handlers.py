@@ -327,14 +327,28 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
                 f"💡 Tip: Try searching for another creator or check back in a few hours!"
             )
             return
+        
+        # Check if creator has no content (0 items)
+        total_pictures = len(content_directory.get('preview_images', []))
+        total_videos = len(content_directory.get('video_links', []))
+        total_items = len(content_directory.get('items', []))
+        
+        if total_pictures == 0 and total_videos == 0 and total_items == 0:
+            await query.edit_message_text(
+                f"📭 No content currently available for '{creator_name}'.\n\n"
+                f"This creator's thread may be empty or all content has been filtered out.\n\n"
+                f"💡 Try:\n"
+                f"• Adjusting your filters\n"
+                f"• Searching for another creator\n"
+                f"• Submitting request for creator."
+            )
+            return
             
         # Update session
         session.current_directory = content_directory
         session.current_creator = creator_name
         
         # Display content directory (always show Load More if not all pages fetched)
-        total_pictures = len(content_directory.get('preview_images', []))
-        total_videos = len(content_directory.get('video_links', []))
         total_pages = content_directory.get('total_pages', 1)
         end_page = content_directory.get('end_page', 1)
         has_more_pages = end_page < total_pages  # Show if not all pages fetched
@@ -450,13 +464,27 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
             )
             return
         
+        # Check if creator has no content (0 items)
+        total_pictures = len(content_directory.get('preview_images', []))
+        total_videos = len(content_directory.get('video_links', []))
+        total_items = len(content_directory.get('items', []))
+        
+        if total_pictures == 0 and total_videos == 0 and total_items == 0:
+            await query.edit_message_text(
+                f"📭 No content currently available for '{creator_name}'.\n\n"
+                f"This creator's thread may be empty or all content has been filtered out.\n\n"
+                f"💡 Try:\n"
+                f"• Adjusting your filters\n"
+                f"• Searching for another creator\n"
+                f"• Submitting request for creator"
+            )
+            return
+        
         # Update session
         session.current_directory = content_directory
         session.current_creator = creator_name
         
         # Display content directory
-        total_pictures = len(content_directory.get('preview_images', []))
-        total_videos = len(content_directory.get('video_links', []))
         total_pages = content_directory.get('total_pages', 1)
         end_page = content_directory.get('end_page', 1)
         has_more_pages = end_page < total_pages
@@ -562,8 +590,15 @@ async def handle_load_more_pages(query, session, bot_instance) -> None:
     creator_name = session.current_creator
     current_content = session.current_directory
     
+    # Log current state for debugging
+    logger.info(f"Load More clicked for: {creator_name}")
+    logger.info(f"Current end_page: {current_content.get('end_page', 'unknown')}")
+    logger.info(f"Current total_pages: {current_content.get('total_pages', 'unknown')}")
+    logger.info(f"Current has_more_pages: {current_content.get('has_more_pages', 'unknown')}")
+    
     # Check if there is actually more content to load
     if not current_content.get('has_more_pages', False):
+        logger.info(f"No more pages available for {creator_name}")
         await query.answer("✅ All available content has been loaded!", show_alert=True)
         return
     
@@ -685,7 +720,7 @@ async def handle_apply_filter(query, session, data: str) -> None:
         )
 
 async def handle_download_request(query, session, data: str, bot_instance) -> None:
-    """Handle download link request for content with inline keyboard button."""
+    """Handle download link request for content with hidden links."""
     content_idx = int(data.split("_")[1])
     
     if not session.current_directory or content_idx >= len(session.current_directory['items']):
@@ -705,27 +740,27 @@ async def handle_download_request(query, session, data: str, bot_instance) -> No
             session.increment_downloads()
             title = item.get('title', 'Untitled')
             
-            link_text = f"""
-🔗 Download Link Generated
+            link_text = f"""🔗 Download Link Generated
 
 📄 Content: {title}
 🎬 Type: {item.get('type', 'Unknown')}
+
+[👀 Download Content]({download_link})
 
 ⚠️ Important:
 • Right-click → Save As to download
 • Some links may require opening in browser
 
-💡 Tip: Use the button below to access the content.
+💡 Tip: Use the link above to access the content.
             """
             
             keyboard = [
-                [InlineKeyboardButton("👀 Download Content", url=download_link)],
                 [InlineKeyboardButton("🔄 Generate New Link", callback_data=f"download_{content_idx}")],
                 [InlineKeyboardButton("⬅️ Back to Details", callback_data=f"content_{content_idx}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(link_text, reply_markup=reply_markup)
+            await query.edit_message_text(link_text, reply_markup=reply_markup, parse_mode='Markdown')
         else:
             await query.edit_message_text("❌ Failed to generate download link. Please try again later.")
             
@@ -842,102 +877,117 @@ async def handle_view_pictures(query, session, page: int = 0) -> None:
     
     # Check cache for this specific page
     creator_url = session.current_directory.get('url', '')
+    if not creator_url:
+        # Fallback: use creator name if URL is missing
+        creator_url = session.current_creator or 'unknown'
+        logger.debug(f"Using creator name as cache key fallback: {creator_url}")
+    else:
+        logger.debug(f"Using URL as cache key: {creator_url}")
     cached_messages = _get_cached_media_page('pictures', creator_url, page)
     
     if cached_messages:
         logger.info(f"✓ Using cached picture messages for page {page}")
-        # Send cached messages
-        message_tasks = [
-            send_message_with_retry(
-                query.message.reply_text,
-                msg['text'],
-                reply_markup=msg.get('reply_markup'),
-                disable_web_page_preview=msg.get('disable_web_page_preview', True)
-            )
-            for msg in cached_messages
-        ]
-        
-        # Send all messages concurrently in batches
-        batch_size = 5
-        for i in range(0, len(message_tasks), batch_size):
-            batch = message_tasks[i:i+batch_size]
+        # Send cached messages immediately one by one (they're already processed)
+        for msg in cached_messages:
             try:
-                await asyncio.gather(*batch, return_exceptions=True)
+                await send_message_with_retry(
+                    query.message.reply_text,
+                    msg['text'],
+                    parse_mode=msg.get('parse_mode', 'Markdown'),
+                    disable_web_page_preview=msg.get('disable_web_page_preview', False)
+                )
+                # Very small delay for cached messages
+                await asyncio.sleep(0.1)
             except Exception as e:
-                logger.error(f"Failed to send cached image batch: {e}")
-            
-            # Delay for cached images too
-            if i + batch_size < len(message_tasks):
-                await asyncio.sleep(0.5)
-            else:
-                await asyncio.sleep(0.3)
+                logger.error(f"Failed to send cached picture message: {e}")
     else:
         await query.edit_message_text(f"Loading pictures {start_idx + 1}-{min(end_idx, len(preview_images))}...")
         
         creator_name = session.current_creator or 'Unknown Creator'
         
-        # Generate all landing URLs concurrently
-        async def generate_picture_data(idx: int, item: dict) -> dict:
-            """Generate landing URL and message data for a picture with inline keyboard"""
-            original_url = item.get('url', '')
-            
-            landing_url = await landing_service.generate_landing_url_async(
-                creator_name=creator_name,
-                content_title=f'Picture #{start_idx + idx + 1}',
-                content_type='🖼️ Picture',
-                original_url=original_url,
-                preview_url=original_url,
-                thumbnail_url=original_url
+        # Track timing for performance monitoring
+        import time
+        start_time = time.time()
+        
+        # Prepare batch request for all pictures
+        batch_items = []
+        for idx, item in enumerate(page_items):
+            batch_items.append({
+                'creator_name': creator_name,
+                'content_title': f'Picture #{start_idx + idx + 1}',
+                'content_type': '🖼️ Picture',
+                'original_url': item.get('url', ''),
+                'preview_url': item.get('url', ''),
+                'thumbnail_url': item.get('url', ''),
+                'expires_hours': 24
+            })
+        
+        # Send batch request to FastAPI
+        logger.info(f"📤 Sending batch request to FastAPI for {len(batch_items)} pictures")
+        batch_start = time.time()
+        
+        try:
+            landing_urls = await landing_service.generate_batch_landing_urls_async(batch_items)
+            batch_time = time.time() - batch_start
+            logger.info(f"✅ Received {len(landing_urls)} landing URLs in {batch_time:.2f}s")
+        except Exception as e:
+            batch_time = time.time() - batch_start
+            logger.error(f"❌ Batch request failed after {batch_time:.2f}s: {e}")
+            # Show user-friendly error message
+            await query.edit_message_text(
+                "❌ Failed to load pictures. Please try again later.\n\n"
+                "The server may be temporarily unavailable."
             )
+            return
+        
+        # Send all pictures to user
+        messages_to_cache = []
+        
+        async def send_picture_message(idx: int, landing_url: str) -> dict:
+            """Send a single picture message to user"""
+            message_text = f"""🖼️ Picture #{start_idx + idx + 1}
+
+[👀 View Image]({landing_url})
+"""
             
-            message_text = f"🖼️ Picture #{start_idx + idx + 1}"
-            
-            # Create inline keyboard with view button
-            keyboard = [[InlineKeyboardButton("👀 View Image", url=landing_url)]]
-            
-            return {
+            message_data = {
                 'text': message_text,
-                'reply_markup': InlineKeyboardMarkup(keyboard),
-                'disable_web_page_preview': True
+                'parse_mode': 'Markdown',
+                'disable_web_page_preview': False
             }
-        
-        # Generate all landing URLs concurrently
-        landing_tasks = [
-            generate_picture_data(idx, item)
-            for idx, item in enumerate(page_items)
-        ]
-        messages_to_cache = await asyncio.gather(*landing_tasks, return_exceptions=True)
-        
-        # Send messages concurrently in batches
-        batch_size = 5
-        for i in range(0, len(messages_to_cache), batch_size):
-            batch = messages_to_cache[i:i+batch_size]
             
-            # Create send tasks
-            send_tasks = []
-            for msg_data in batch:
-                if isinstance(msg_data, dict):  # Check it's not an exception
-                    send_tasks.append(
-                        send_message_with_retry(
-                            query.message.reply_text,
-                            msg_data['text'],
-                            reply_markup=msg_data.get('reply_markup'),
-                            disable_web_page_preview=msg_data['disable_web_page_preview']
-                        )
-                    )
-            
+            # Send message immediately
             try:
-                await asyncio.gather(*send_tasks, return_exceptions=True)
+                await send_message_with_retry(
+                    query.message.reply_text,
+                    message_data['text'],
+                    parse_mode=message_data.get('parse_mode', 'Markdown'),
+                    disable_web_page_preview=message_data['disable_web_page_preview']
+                )
+                # Small delay to avoid hitting rate limits
+                await asyncio.sleep(0.15)
             except Exception as e:
-                logger.error(f"Failed to send image batch: {e}")
+                logger.error(f"Failed to send picture message: {e}")
             
-            # Delay between batches to allow Telegram to fetch preview
-            if i + batch_size < len(messages_to_cache):
-                await asyncio.sleep(0.5)  # 500ms delay for preview loading
-            else:
-                await asyncio.sleep(0.3)  # 300ms delay after last batch
+            return message_data
         
-        # Cache the messages for this page
+        # Send all pictures concurrently
+        logger.info(f"🚀 Sending {len(landing_urls)} picture messages to user")
+        send_start = time.time()
+        tasks = [send_picture_message(idx, landing_urls[idx]) for idx in range(len(landing_urls))]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        send_time = time.time() - send_start
+        
+        # Filter out None and exceptions
+        for result in results:
+            if result and not isinstance(result, Exception):
+                messages_to_cache.append(result)
+        
+        total_time = time.time() - start_time
+        logger.info(f"⏱️ Completed {len(messages_to_cache)}/{len(page_items)} pictures in {total_time:.2f}s")
+        logger.info(f"⏱️ Completed {len(messages_to_cache)}/{len(page_items)} pictures in {total_time:.2f}s")
+        
+        # Cache the messages for this page (in background)
         _cache_media_page('pictures', creator_url, page, messages_to_cache)
     
     # Send navigation message
@@ -1163,7 +1213,7 @@ Click the button below to get the direct link.
     await query.edit_message_text(details_text, reply_markup=reply_markup)
 
 async def handle_picture_link(query, session, data: str) -> None:
-    """Show picture landing page link with inline keyboard button."""
+    """Show picture landing page link with hidden links."""
     picture_idx = int(data.split("_")[2])
     
     if not session.current_directory:
@@ -1189,17 +1239,18 @@ async def handle_picture_link(query, session, data: str) -> None:
         thumbnail_url=original_url
     )
     
-    link_text = f"🖼️ Picture #{picture_idx + 1}"
+    link_text = f"""🖼️ Picture #{picture_idx + 1}
+
+[👀 View Image]({landing_url})
+"""
     
-    # Create inline keyboard with view button
     keyboard = [
-        [InlineKeyboardButton("👀 View Image", url=landing_url)],
         [InlineKeyboardButton("⬅️ Back to Picture", callback_data=f"picture_{picture_idx}")],
         [InlineKeyboardButton("📋 Back to Pictures List", callback_data="view_pictures")]
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(link_text, reply_markup=reply_markup)
+    await query.edit_message_text(link_text, reply_markup=reply_markup, parse_mode='Markdown')
 
 async def handle_view_videos(query, session, page: int = 0) -> None:
     """Show video links list."""
@@ -1226,136 +1277,135 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
     
     # Check cache for this specific page
     creator_url = session.current_directory.get('url', '')
+    if not creator_url:
+        # Fallback: use creator name if URL is missing
+        creator_url = session.current_creator or 'unknown'
+        logger.debug(f"Using creator name as cache key fallback: {creator_url}")
+    else:
+        logger.debug(f"Using URL as cache key: {creator_url}")
     cached_messages = _get_cached_media_page('videos', creator_url, page)
     
     if cached_messages:
         logger.info(f"✓ Using cached video messages for page {page}")
-        # Send cached messages
-        message_tasks = [
-            send_message_with_retry(
-                query.message.reply_text,
-                msg['text'],
-                reply_markup=msg.get('reply_markup'),
-                disable_web_page_preview=msg.get('disable_web_page_preview', False)
-            )
-            for msg in cached_messages
-        ]
-        
-        # Send all messages concurrently in batches
-        batch_size = 5
-        for i in range(0, len(message_tasks), batch_size):
-            batch = message_tasks[i:i+batch_size]
+        # Send cached messages immediately one by one (they're already processed)
+        for msg in cached_messages:
             try:
-                await asyncio.gather(*batch, return_exceptions=True)
+                await send_message_with_retry(
+                    query.message.reply_text,
+                    msg['text'],
+                    parse_mode=msg.get('parse_mode', 'Markdown'),
+                    disable_web_page_preview=msg.get('disable_web_page_preview', False)
+                )
+                # Very small delay for cached messages
+                await asyncio.sleep(0.1)
             except Exception as e:
-                logger.error(f"Failed to send cached video batch: {e}")
-            
-            # Delay for cached videos too
-            if i + batch_size < len(message_tasks):
-                await asyncio.sleep(0.5)
-            else:
-                await asyncio.sleep(0.3)
+                logger.error(f"Failed to send cached video message: {e}")
     else:
         await query.edit_message_text(f"Loading videos {start_idx + 1}-{min(end_idx, len(video_links))}...")
         
-        # Import required modules
-        from utils.video_preview_extractor import get_video_preview_async
-        
         creator_name = session.current_creator or 'Unknown Creator'
         
-        # Step 1: Extract all previews concurrently using async
-        async def extract_preview_async(url: str) -> Optional[str]:
-            """Extract preview asynchronously"""
-            if 'bunkr' in url.lower():
-                try:
-                    preview = await get_video_preview_async(url)
-                    return preview
-                except Exception as e:
-                    logger.error(f"Failed to extract preview: {e}")
-                    return None
-            return None
+        # Track timing for performance monitoring
+        import time
+        start_time = time.time()
         
-        # Extract all previews concurrently
-        preview_tasks = [
-            extract_preview_async(item.get('url', ''))
-            for item in page_items
-        ]
-        extracted_previews = await asyncio.gather(*preview_tasks, return_exceptions=True)
+        # Prepare batch request for all videos
+        batch_items = []
+        for idx, item in enumerate(page_items):
+            batch_items.append({
+                'creator_name': creator_name,
+                'content_title': item.get('title', f'Video #{start_idx + idx + 1}'),
+                'content_type': item.get('type', '🎬 Video'),
+                'original_url': item.get('url', ''),
+                'preview_url': None,
+                'thumbnail_url': None,
+                'expires_hours': 24
+            })
         
-        # Step 2: Generate all landing URLs concurrently
-        async def generate_landing_data(idx: int, item: dict, preview_url: Optional[str]) -> dict:
-            """Generate landing URL and prepare message data with inline keyboard"""
+        # Send batch request to FastAPI
+        logger.info(f"📤 Sending batch request to FastAPI for {len(batch_items)} videos")
+        batch_start = time.time()
+        
+        try:
+            landing_urls = await landing_service.generate_batch_landing_urls_async(batch_items)
+            batch_time = time.time() - batch_start
+            logger.info(f"✅ Received {len(landing_urls)} landing URLs in {batch_time:.2f}s")
+        except Exception as e:
+            batch_time = time.time() - batch_start
+            logger.error(f"❌ Batch request failed after {batch_time:.2f}s: {e}")
+            # Show user-friendly error message
+            await query.edit_message_text(
+                "❌ Failed to load videos. Please try again later.\n\n"
+                "The server may be temporarily unavailable."
+            )
+            return
+        
+        # Send all videos to user
+        messages_to_cache = []
+        
+        async def send_video_message(idx: int, landing_url: str, item: dict) -> dict:
+            """Send a single video message to user"""
             from managers.permissions_manager import get_permissions_manager
             
             original_url = item.get('url', '')
             title = item.get('title', f'Video #{start_idx + idx + 1}')
-            
-            landing_url = await landing_service.generate_landing_url_async(
-                creator_name=creator_name,
-                content_title=title,
-                content_type=item.get('type', '🎬 Video'),
-                original_url=original_url,
-                preview_url=preview_url if isinstance(preview_url, str) else None,
-                thumbnail_url=preview_url if isinstance(preview_url, str) else None
-            )
             
             # Check if user is a worker to show original URL
             permissions = get_permissions_manager()
             user_id = query.from_user.id
             is_worker = permissions.is_worker(user_id)
             
-            # Create message text without links
-            message_text = f"🎬 {title}"
-            
-            # Create inline keyboard with buttons
-            keyboard = []
-            keyboard.append([InlineKeyboardButton("👀 View Video", url=landing_url)])
-            
+            # Create message text with hidden links using Markdown
             if is_worker:
-                # Workers get additional button for original URL
-                keyboard.append([InlineKeyboardButton("🔗 Original Link", url=original_url)])
+                message_text = f"""🎬 {title}
+
+[👀 View Video]({landing_url})
+[🔗 Original Link]({original_url})
+"""
+            else:
+                message_text = f"""🎬 {title}
+
+[👀 View Video]({landing_url})
+"""
             
-            return {
+            message_data = {
                 'text': message_text,
-                'disable_web_page_preview': True,
-                'reply_markup': InlineKeyboardMarkup(keyboard),
-                'original_url': original_url  # Store for potential worker use
+                'parse_mode': 'Markdown',
+                'disable_web_page_preview': False,
+                'original_url': original_url
             }
-        
-        # Generate all landing URLs concurrently
-        landing_tasks = [
-            generate_landing_data(idx, item, preview)
-            for idx, (item, preview) in enumerate(zip(page_items, extracted_previews))
-        ]
-        messages_to_cache = await asyncio.gather(*landing_tasks, return_exceptions=True)
-        
-        # Step 3: Send videos in batches of 3 for faster delivery
-        batch_size = 3
-        for i in range(0, len(messages_to_cache), batch_size):
-            batch = messages_to_cache[i:i+batch_size]
             
-            # Send batch concurrently
-            send_tasks = []
-            for msg_data in batch:
-                if isinstance(msg_data, dict):  # Check it's not an exception
-                    send_tasks.append(
-                        send_message_with_retry(
-                            query.message.reply_text,
-                            msg_data['text'],
-                            reply_markup=msg_data.get('reply_markup'),
-                            disable_web_page_preview=msg_data['disable_web_page_preview']
-                        )
-                    )
-            
+            # Send message immediately
             try:
-                await asyncio.gather(*send_tasks, return_exceptions=True)
-                # Delay between batches for Telegram preview loading
-                if i + batch_size < len(messages_to_cache):
-                    await asyncio.sleep(0.5)
+                await send_message_with_retry(
+                    query.message.reply_text,
+                    message_data['text'],
+                    parse_mode=message_data.get('parse_mode', 'Markdown'),
+                    disable_web_page_preview=message_data['disable_web_page_preview']
+                )
+                # Small delay to avoid hitting rate limits
+                await asyncio.sleep(0.2)
             except Exception as e:
-                logger.error(f"Failed to send video batch: {e}")
+                logger.error(f"Failed to send video message: {e}")
+            
+            return message_data
         
-        # Cache the messages for this page
+        # Send all videos concurrently
+        logger.info(f"🚀 Sending {len(landing_urls)} video messages to user")
+        send_start = time.time()
+        tasks = [send_video_message(idx, landing_urls[idx], page_items[idx]) for idx in range(len(landing_urls))]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        send_time = time.time() - send_start
+        
+        # Filter out None and exceptions
+        for result in results:
+            if result and not isinstance(result, Exception):
+                messages_to_cache.append(result)
+        
+        total_time = time.time() - start_time
+        logger.info(f"⏱️ Completed {len(messages_to_cache)}/{len(page_items)} videos in {total_time:.2f}s")
+        
+        # Cache the messages for this page (in background)
         _cache_media_page('videos', creator_url, page, messages_to_cache)
     
     # Send navigation message
@@ -1638,15 +1688,17 @@ async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> No
                     return
                 
                 if response.status_code == 403:
-                    # Try alternative approach: provide direct link and explain
-                    keyboard = [[InlineKeyboardButton("👀 View Feed Manually", url=f"https://coomer.st/onlyfans/user/{username}")]]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    
+                    # Try alternative approach: provide direct link with hidden link
                     await query.edit_message_text(
-                        f"⚠️ Access Currently Unavailable\n\n"
-                        f"The archive database is currently blocking automated requests for @{username}.\n\n"
-                        f"💡 Note: The button below provides access to all archived posts, photos, and videos from this creator's OnlyFans.",
-                        reply_markup=reply_markup
+                        f"""⚠️ Access Currently Unavailable
+
+The archive database is currently blocking automated requests for @{username}.
+
+[👀 View Feed Manually](https://coomer.st/onlyfans/user/{username})
+
+💡 Note: The link above provides access to all archived posts, photos, and videos from this creator's OnlyFans.""",
+                        parse_mode='Markdown',
+                        disable_web_page_preview=False
                     )
                     return
                 
@@ -1862,67 +1914,12 @@ async def display_of_feed_page(query, session, page: int) -> None:
         if batch_end < len(page_posts):
             await asyncio.sleep(0.2)
     
-    # Send media to Telegram - OPTIMIZED WITH CONCURRENT SENDING & LANDING PAGES
+    # Send media to Telegram - OPTIMIZED WITH BATCH LANDING PAGE GENERATION
     
-    # Generate landing URLs for all media items concurrently
-    async def generate_landing_for_media(post_idx: int, caption: str, media_type: str, media_url: str) -> dict:
-        """Generate landing URL for a media item with inline keyboard"""
-        try:
-            # Extract post number from caption if available
-            post_match = re.search(r'Post #(\d+)', caption) if caption else None
-            post_num = post_match.group(1) if post_match else str(post_idx + 1)
-            
-            content_title = f"OnlyFans Post #{post_num}"
-            content_type = "🖼️ Photo" if media_type == 'photo' else "🎬 Video"
-            
-            # Generate landing URL
-            landing_url = await landing_service.generate_landing_url_async(
-                creator_name=username,
-                content_title=content_title,
-                content_type=content_type,
-                original_url=media_url,
-                preview_url=media_url if media_type == 'photo' else None,
-                thumbnail_url=media_url if media_type == 'photo' else None
-            )
-            
-            # Format message without links
-            media_label = "Image Post" if media_type == 'photo' else "Video Post"
-            media_icon = "🖼️" if media_type == 'photo' else "🎬"
-            
-            if caption:
-                message_text = f"{caption}\n\n{media_icon} {media_label}"
-            else:
-                message_text = f"{media_icon} {media_label}"
-            
-            # Create inline keyboard with view button
-            keyboard = [[InlineKeyboardButton("👀 View Content", url=landing_url)]]
-            
-            return {
-                'text': message_text,
-                'disable_web_page_preview': True,
-                'reply_markup': InlineKeyboardMarkup(keyboard)
-            }
-        except Exception as e:
-            logger.error(f"Error generating landing URL for OF post: {e}")
-            # Fallback to direct URL button
-            media_label = "Image Post" if media_type == 'photo' else "Video Post"
-            media_icon = "🖼️" if media_type == 'photo' else "🎬"
-            
-            if caption:
-                message_text = f"{caption}\n\n{media_icon} {media_label}"
-            else:
-                message_text = f"{media_icon} {media_label}"
-            
-            keyboard = [[InlineKeyboardButton("👀 View Content", url=media_url)]]
-            
-            return {
-                'text': message_text,
-                'disable_web_page_preview': True,
-                'reply_markup': InlineKeyboardMarkup(keyboard)
-            }
+    # Prepare batch items for all media
+    batch_items = []
+    media_metadata = []  # Store caption and type info for later formatting
     
-    # Prepare all landing URL generation tasks
-    landing_tasks = []
     for post_idx, post_data in enumerate(all_post_data):
         if not post_data:
             continue
@@ -1930,25 +1927,88 @@ async def display_of_feed_page(query, session, page: int) -> None:
         caption, media_items = post_data
         
         if media_items:
-            for media_type, media_url in media_items:
-                landing_tasks.append(
-                    generate_landing_for_media(post_idx, caption, media_type, media_url)
-                )
-                # Only send caption with first media item
-                caption = None
+            for media_idx, (media_type, media_url) in enumerate(media_items):
+                # Extract post number from caption if available
+                post_match = re.search(r'Post #(\d+)', caption) if caption else None
+                post_num = post_match.group(1) if post_match else str(post_idx + 1)
+                
+                content_title = f"OnlyFans Post #{post_num}"
+                content_type = "🖼️ Photo" if media_type == 'photo' else "🎬 Video"
+                
+                batch_items.append({
+                    'creator_name': username,
+                    'content_title': content_title,
+                    'content_type': content_type,
+                    'original_url': media_url,
+                    'preview_url': media_url if media_type == 'photo' else None,
+                    'thumbnail_url': media_url if media_type == 'photo' else None,
+                    'expires_hours': 24
+                })
+                
+                # Store metadata for message formatting (only include caption for first media)
+                media_metadata.append({
+                    'caption': caption if media_idx == 0 else None,
+                    'media_type': media_type,
+                    'media_url': media_url
+                })
         else:
-            # No media, create a simple async task that returns text-only message data
-            async def create_text_only_message(text):
-                return {
-                    'text': f"{text}\n\n💬 Text-only post", 
-                    'disable_web_page_preview': True,
-                    'reply_markup': None
-                }
-            
-            landing_tasks.append(create_text_only_message(caption))
+            # Text-only post metadata
+            media_metadata.append({
+                'caption': caption,
+                'media_type': 'text',
+                'media_url': None
+            })
     
-    # Generate all landing URLs concurrently
-    message_data_list = await asyncio.gather(*landing_tasks, return_exceptions=True)
+    # Generate all landing URLs in one batch request
+    try:
+        logger.info(f"📤 Sending batch request to FastAPI for {len(batch_items)} OnlyFans media items")
+        landing_urls = await landing_service.generate_batch_landing_urls_async(batch_items)
+        logger.info(f"✅ Received {len(landing_urls)} landing URLs for OnlyFans feed")
+    except Exception as e:
+        logger.error(f"❌ Batch request failed for OnlyFans feed: {e}")
+        # Fallback: show error message
+        await message.reply_text(
+            "❌ Failed to generate landing pages for media.\n\n"
+            "Please try again later."
+        )
+        return
+    
+    # Create message data from batch results
+    message_data_list = []
+    landing_url_idx = 0
+    
+    for metadata in media_metadata:
+        if metadata['media_type'] == 'text':
+            # Text-only post
+            message_data_list.append({
+                'text': f"{metadata['caption']}\n\n💬 Text-only post",
+                'parse_mode': 'Markdown',
+                'disable_web_page_preview': False
+            })
+        else:
+            # Media post with landing URL
+            landing_url = landing_urls[landing_url_idx]
+            landing_url_idx += 1
+            
+            media_label = "Image Post" if metadata['media_type'] == 'photo' else "Video Post"
+            media_icon = "🖼️" if metadata['media_type'] == 'photo' else "🎬"
+            
+            if metadata['caption']:
+                message_text = f"""{metadata['caption']}
+
+{media_icon} {media_label}
+[👀 View Content]({landing_url})
+"""
+            else:
+                message_text = f"""{media_icon} {media_label}
+[👀 View Content]({landing_url})
+"""
+            
+            message_data_list.append({
+                'text': message_text,
+                'parse_mode': 'Markdown',
+                'disable_web_page_preview': False
+            })
     
     # Create message tasks from generated data
     message_tasks = []
@@ -1957,8 +2017,8 @@ async def display_of_feed_page(query, session, page: int) -> None:
             message_tasks.append(
                 message.reply_text(
                     msg_data['text'],
-                    reply_markup=msg_data.get('reply_markup'),
-                    disable_web_page_preview=msg_data.get('disable_web_page_preview', True)
+                    parse_mode=msg_data.get('parse_mode', 'Markdown'),
+                    disable_web_page_preview=msg_data.get('disable_web_page_preview', False)
                 )
             )
     

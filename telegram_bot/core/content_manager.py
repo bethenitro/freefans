@@ -54,11 +54,12 @@ class ContentManager:
             cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24)
             if cached_result:
                 # Check if cached result has actual content (not empty cache)
-                total_content = (
-                    cached_result.get('total_items', 0) + 
-                    cached_result.get('total_preview_images', 0) + 
-                    cached_result.get('total_video_links', 0)
-                )
+                # Try to get totals first (new format), fallback to calculating from arrays (old format)
+                items_count = cached_result.get('total_items', len(cached_result.get('items', [])))
+                preview_count = cached_result.get('total_preview_images', len(cached_result.get('preview_images', [])))
+                video_count = cached_result.get('total_video_links', len(cached_result.get('video_links', [])))
+                
+                total_content = items_count + preview_count + video_count
                 
                 if total_content > 0:
                     logger.info(f"✓ Using cached content for: {creator_name} ({total_content} items)")
@@ -178,7 +179,8 @@ class ContentManager:
                 'start_page': scrape_result['start_page'],
                 'end_page': scrape_result['end_page'],
                 'has_more_pages': scrape_result['has_more_pages'],
-                'social_links': scrape_result.get('social_links', {})  # Pass through social links
+                'social_links': scrape_result.get('social_links', {}),  # Pass through social links
+                'url': scrape_result['url']  # Add URL for cache key
             }
             
             # Save to persistent cache for future use
@@ -187,7 +189,14 @@ class ContentManager:
                     'items': content_items,
                     'preview_images': preview_items,
                     'video_links': video_items,
+                    'total_items': len(content_items),
+                    'total_preview_images': len(preview_items),
+                    'total_video_links': len(video_items),
                     'total_pages': scrape_result['total_pages'],
+                    'pages_scraped': scrape_result['pages_scraped'],
+                    'start_page': scrape_result['start_page'],
+                    'end_page': scrape_result['end_page'],
+                    'has_more_pages': scrape_result['has_more_pages'],
                     'social_links': scrape_result.get('social_links', {})
                 }
                 self.cache_manager.save_creator_cache(
@@ -220,51 +229,76 @@ class ContentManager:
             Updated content dictionary with merged results
         """
         try:
-            # Calculate the starting page for the next batch
-            start_page = existing_content['end_page'] + 1
-            
-            # Fetch more content
-            logger.info(f"Fetching additional pages {start_page}-{start_page + pages_to_fetch - 1} for: {creator_name}")
-            more_content = await self.search_creator_content(
-                creator_name, 
-                filters, 
-                max_pages=pages_to_fetch, 
-                start_page=start_page
-            )
+            # Handle cached content that might not have proper pagination metadata
+            end_page = existing_content.get('end_page')
+            if end_page is None or end_page == 0:
+                # If no end_page info, do a full scrape instead of partial
+                logger.info(f"No end_page info for cached content, doing full scrape for: {creator_name}")
+                more_content = await self.search_creator_content(
+                    creator_name, 
+                    filters, 
+                    max_pages=0,  # 0 means scrape all available pages
+                    start_page=1,
+                    cache_only=False  # Force fresh scraping
+                )
+            else:
+                # Normal case: fetch next batch of pages
+                start_page = end_page + 1
+                logger.info(f"Fetching additional pages {start_page}-{start_page + pages_to_fetch - 1} for: {creator_name}")
+                more_content = await self.search_creator_content(
+                    creator_name, 
+                    filters, 
+                    max_pages=pages_to_fetch, 
+                    start_page=start_page,
+                    cache_only=False  # Force fresh scraping for additional pages
+                )
             
             if not more_content:
                 logger.warning(f"Failed to fetch additional pages for: {creator_name}")
                 return existing_content
             
-            # Merge the new content with existing content
-            # Merge items
-            existing_items = existing_content.get('items', [])
-            new_items = more_content.get('items', [])
-            merged_items = existing_items + new_items
+            # Check if this was a full scrape (when end_page was missing)
+            was_full_scrape = existing_content.get('end_page') is None or existing_content.get('end_page') == 0
             
-            # Merge preview images
-            existing_images = existing_content.get('preview_images', [])
-            new_images = more_content.get('preview_images', [])
-            merged_images = existing_images + new_images
+            if was_full_scrape:
+                # Replace cached content entirely with fresh scrape
+                logger.info(f"Replacing cached content with full scrape results for: {creator_name}")
+                # Keep some original metadata but use new content
+                existing_content.update(more_content)
+                existing_content['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M')
+                logger.info(f"Successfully replaced content. Total items: {more_content.get('total_items', 0)}")
+            else:
+                # Merge the new content with existing content
+                # Merge items
+                existing_items = existing_content.get('items', [])
+                new_items = more_content.get('items', [])
+                merged_items = existing_items + new_items
+                
+                # Merge preview images
+                existing_images = existing_content.get('preview_images', [])
+                new_images = more_content.get('preview_images', [])
+                merged_images = existing_images + new_images
+                
+                # Merge video links
+                existing_videos = existing_content.get('video_links', [])
+                new_videos = more_content.get('video_links', [])
+                merged_videos = existing_videos + new_videos
+                
+                # Update the content dictionary with safe field access
+                existing_content['items'] = merged_items
+                existing_content['total_items'] = len(merged_items)
+                existing_content['preview_images'] = merged_images
+                existing_content['total_preview_images'] = len(merged_images)
+                existing_content['video_links'] = merged_videos
+                existing_content['total_video_links'] = len(merged_videos)
+                existing_content['pages_scraped'] = existing_content.get('pages_scraped', 0) + more_content.get('pages_scraped', 0)
+                existing_content['end_page'] = more_content.get('end_page', existing_content.get('end_page', 0))
+                existing_content['has_more_pages'] = more_content.get('has_more_pages', False)
+                existing_content['total_pages'] = more_content.get('total_pages', existing_content.get('total_pages', 0))
+                existing_content['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M')
+                
+                logger.info(f"Successfully merged additional content. Total items: {len(merged_items)}")
             
-            # Merge video links
-            existing_videos = existing_content.get('video_links', [])
-            new_videos = more_content.get('video_links', [])
-            merged_videos = existing_videos + new_videos
-            
-            # Update the content dictionary
-            existing_content['items'] = merged_items
-            existing_content['total_items'] = len(merged_items)
-            existing_content['preview_images'] = merged_images
-            existing_content['total_preview_images'] = len(merged_images)
-            existing_content['video_links'] = merged_videos
-            existing_content['total_video_links'] = len(merged_videos)
-            existing_content['pages_scraped'] = existing_content['pages_scraped'] + more_content['pages_scraped']
-            existing_content['end_page'] = more_content['end_page']
-            existing_content['has_more_pages'] = more_content['has_more_pages']
-            existing_content['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M')
-            
-            logger.info(f"Successfully merged additional content. Total items: {len(merged_items)}")
             return existing_content
             
         except Exception as e:
@@ -445,6 +479,21 @@ class ContentManager:
         filtered_result = result.copy()
         filtered_result['items'] = filtered_items
         filtered_result['total_items'] = len(filtered_items)
+        
+        # For cached content, we need to determine if more pages might be available
+        # If the cached content shows it was partially scraped, allow loading more
+        end_page = result.get('end_page', 0)
+        total_pages = result.get('total_pages', 0)
+        
+        # If we have pagination info and end_page < total_pages, there might be more content
+        if total_pages > 0 and end_page < total_pages:
+            filtered_result['has_more_pages'] = True
+        else:
+            # For cached content without clear pagination info, assume more might be available
+            # unless explicitly marked as complete
+            cached_has_more = result.get('has_more_pages', False)
+            # If the cache doesn't explicitly say "no more pages", allow trying to load more
+            filtered_result['has_more_pages'] = cached_has_more or (end_page > 0 and total_pages == 0)
         
         return filtered_result
 

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from shared.data.models import Creator, OnlyFansUser, OnlyFansPost
+from shared.data.models import Creator, OnlyFansUser, OnlyFansPost, LandingPage
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,13 @@ def get_creator_content(db: Session, name: str, max_age_hours: int = 24) -> Opti
             logger.warning(f"Error checking age for creator {name}: {e}, returning content anyway")
     
     try:
-        return json.loads(creator.content) if creator.content else None
+        content = json.loads(creator.content) if creator.content else None
+        if content:
+            # Add URL to the cached content for proper cache key generation
+            # Generate URL from creator name (this matches the pattern used in scraping)
+            creator_url = f"https://simpcity.cr/threads/{name.lower().replace(' ', '-').replace('_', '-')}.11680/"
+            content['url'] = creator_url
+        return content
     except json.JSONDecodeError:
         logger.error(f"Invalid JSON content for creator {name}")
         return None
@@ -368,3 +374,173 @@ def cleanup_empty_creators(db: Session) -> int:
         db.rollback()
         logger.error(f"✗ Failed to cleanup empty creators: {e}")
         return 0
+
+# Landing Page CRUD Operations
+def create_landing_page(db: Session, short_id: str, creator: str, title: str, 
+                       content_type: str, original_url: str, preview_url: Optional[str] = None,
+                       thumbnail_url: Optional[str] = None, expires_at: datetime = None) -> LandingPage:
+    """Create a new landing page record."""
+    try:
+        if expires_at is None:
+            expires_at = datetime.utcnow() + timedelta(hours=24)
+        
+        landing_page = LandingPage(
+            short_id=short_id,
+            creator=creator,
+            title=title,
+            content_type=content_type,
+            original_url=original_url,
+            preview_url=preview_url,
+            thumbnail_url=thumbnail_url,
+            expires_at=expires_at
+        )
+        db.add(landing_page)
+        db.commit()
+        db.refresh(landing_page)
+        logger.info(f"✓ Created landing page record for {short_id}")
+        return landing_page
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to create landing page {short_id}: {e}")
+        raise
+
+def upsert_landing_page(db: Session, short_id: str, creator: str, title: str, 
+                        content_type: str, original_url: str, preview_url: Optional[str] = None,
+                        thumbnail_url: Optional[str] = None, expires_at: datetime = None) -> LandingPage:
+    """Create or update a landing page record (upsert)."""
+    try:
+        if expires_at is None:
+            expires_at = datetime.utcnow() + timedelta(hours=24)
+        
+        # Check if record already exists
+        existing = db.query(LandingPage).filter(LandingPage.short_id == short_id).first()
+        
+        if existing:
+            # Update existing record
+            existing.creator = creator
+            existing.title = title
+            existing.content_type = content_type
+            existing.original_url = original_url
+            existing.preview_url = preview_url
+            existing.thumbnail_url = thumbnail_url
+            existing.expires_at = expires_at
+            existing.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(existing)
+            logger.info(f"✓ Updated landing page record for {short_id}")
+            return existing
+        else:
+            # Create new record
+            landing_page = LandingPage(
+                short_id=short_id,
+                creator=creator,
+                title=title,
+                content_type=content_type,
+                original_url=original_url,
+                preview_url=preview_url,
+                thumbnail_url=thumbnail_url,
+                expires_at=expires_at
+            )
+            db.add(landing_page)
+            db.commit()
+            db.refresh(landing_page)
+            logger.info(f"✓ Created landing page record for {short_id}")
+            return landing_page
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to upsert landing page {short_id}: {e}")
+        raise
+
+def get_landing_page(db: Session, short_id: str) -> Optional[LandingPage]:
+    """Get landing page by short_id if not expired."""
+    try:
+        now = datetime.utcnow()
+        landing_page = db.query(LandingPage).filter(
+            LandingPage.short_id == short_id,
+            LandingPage.expires_at > now
+        ).first()
+        return landing_page
+    except Exception as e:
+        logger.error(f"✗ Failed to get landing page {short_id}: {e}")
+        return None
+
+def update_landing_page(db: Session, short_id: str, **kwargs) -> Optional[LandingPage]:
+    """Update landing page data."""
+    try:
+        landing_page = db.query(LandingPage).filter(LandingPage.short_id == short_id).first()
+        if landing_page:
+            for key, value in kwargs.items():
+                if hasattr(landing_page, key):
+                    setattr(landing_page, key, value)
+            landing_page.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(landing_page)
+            logger.info(f"✓ Updated landing page {short_id}")
+            return landing_page
+        return None
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to update landing page {short_id}: {e}")
+        raise
+
+def delete_landing_page(db: Session, short_id: str) -> bool:
+    """Delete landing page by short_id."""
+    try:
+        landing_page = db.query(LandingPage).filter(LandingPage.short_id == short_id).first()
+        if landing_page:
+            db.delete(landing_page)
+            db.commit()
+            logger.info(f"✓ Deleted landing page {short_id}")
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to delete landing page {short_id}: {e}")
+        raise
+
+def cleanup_expired_landing_pages(db: Session) -> int:
+    """Remove expired landing pages from the database."""
+    try:
+        now = datetime.utcnow()
+        expired_pages = db.query(LandingPage).filter(LandingPage.expires_at <= now).all()
+        count = len(expired_pages)
+        
+        if count > 0:
+            db.query(LandingPage).filter(LandingPage.expires_at <= now).delete()
+            db.commit()
+            logger.info(f"✓ Cleaned up {count} expired landing pages from database")
+        else:
+            logger.info("✓ No expired landing pages found to clean up")
+        
+        return count
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to cleanup expired landing pages: {e}")
+        return 0
+
+def get_landing_pages_by_creator(db: Session, creator: str, max_age_hours: int = 24) -> List[LandingPage]:
+    """Get all non-expired landing pages for a creator."""
+    try:
+        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
+        pages = db.query(LandingPage).filter(
+            LandingPage.creator == creator,
+            LandingPage.expires_at > datetime.utcnow(),
+            LandingPage.created_at >= cutoff_time
+        ).order_by(desc(LandingPage.created_at)).all()
+        return pages
+    except Exception as e:
+        logger.error(f"✗ Failed to get landing pages for creator {creator}: {e}")
+        return []
+
+def get_recent_landing_pages(db: Session, cutoff_time: datetime) -> List[LandingPage]:
+    """Get all non-expired landing pages created after cutoff_time."""
+    try:
+        pages = db.query(LandingPage).filter(
+            LandingPage.expires_at > datetime.utcnow(),
+            LandingPage.created_at >= cutoff_time
+        ).order_by(desc(LandingPage.created_at)).all()
+        return pages
+    except Exception as e:
+        logger.error(f"✗ Failed to get recent landing pages: {e}")
+        return []

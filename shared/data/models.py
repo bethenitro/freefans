@@ -42,6 +42,43 @@ class Creator(Base):
     def __repr__(self):
         return f"<Creator(id={self.id}, name='{self.name}', posts={self.post_count})>"
 
+class LandingPage(Base):
+    """
+    Landing page model - stores landing page data for content links
+    """
+    __tablename__ = 'landing_pages'
+    
+    # Primary key
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Landing page identification
+    short_id = Column(String(16), nullable=False, unique=True, index=True)
+    
+    # Content metadata
+    creator = Column(String(255), nullable=False, index=True)
+    title = Column(String(500), nullable=False)
+    content_type = Column(String(50), nullable=False)
+    original_url = Column(Text, nullable=False)
+    preview_url = Column(Text, nullable=True)
+    thumbnail_url = Column(Text, nullable=True)
+    
+    # Expiration
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Indexes for performance
+    __table_args__ = (
+        Index('idx_landing_short_id', short_id),
+        Index('idx_landing_creator', creator),
+        Index('idx_landing_expires_at', expires_at),
+    )
+    
+    def __repr__(self):
+        return f"<LandingPage(id={self.id}, short_id='{self.short_id}', creator='{self.creator}')>"
+
 class OnlyFansUser(Base):
     """
     OnlyFans user model - stores OnlyFans specific user data

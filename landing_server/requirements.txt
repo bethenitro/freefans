@@ -3,3 +3,7 @@ fastapi
 uvicorn[standard]
 python-decouple
 jinja2
+
+# Celery with RabbitMQ for background tasks
+celery[rabbitmq]>=5.3.0
+redis>=4.5.0  # Optional: for Celery result backend

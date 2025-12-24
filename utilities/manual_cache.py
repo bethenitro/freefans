@@ -111,6 +111,23 @@ class ManualCacheManager:
                 print(f"✅ Cleaned up {cleaned} empty creators from database")
             else:
                 print("✅ No empty creators found to clean up")
+        
+        # Cleanup expired landing pages on initialization
+        print("🧹 Cleaning up expired landing pages...")
+        try:
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            db = get_db_session_sync()
+            try:
+                cleaned_landing = crud.cleanup_expired_landing_pages(db)
+                if cleaned_landing > 0:
+                    print(f"✅ Cleaned up {cleaned_landing} expired landing pages from database")
+                else:
+                    print("✅ No expired landing pages found to clean up")
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"⚠️  Failed to cleanup expired landing pages: {e}")
     
     async def cache_all_creators(self, max_creators=None):
         """
@@ -432,6 +449,23 @@ class ManualCacheManager:
             print(f"   • OnlyFans posts: {stats['total_onlyfans_posts']}")
             print(f"   • Database size: {stats.get('database_size_mb', 0)} MB")
             print(f"   • Storage: {stats.get('storage_type', 'Unknown')}")
+            
+            # Show landing page stats
+            try:
+                from shared.config.database import get_db_session_sync
+                from shared.data.models import LandingPage
+                db = get_db_session_sync()
+                try:
+                    total_landing_pages = db.query(LandingPage).count()
+                    active_landing_pages = db.query(LandingPage).filter(
+                        LandingPage.expires_at > datetime.utcnow()
+                    ).count()
+                    print(f"   • Landing pages (total): {total_landing_pages}")
+                    print(f"   • Landing pages (active): {active_landing_pages}")
+                finally:
+                    db.close()
+            except Exception as e:
+                print(f"   • Landing pages: Error getting stats ({e})")
             
             # Show some recent creators
             recent_creators = self.cache_manager.get_all_cached_creators()[:10]

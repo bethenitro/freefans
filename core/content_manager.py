@@ -47,11 +47,12 @@ class ContentManager:
             cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24)
             if cached_result:
                 # Check if cached result has actual content (not empty cache)
-                total_content = (
-                    cached_result.get('total_items', 0) + 
-                    cached_result.get('total_preview_images', 0) + 
-                    cached_result.get('total_video_links', 0)
-                )
+                # Try to get totals first (new format), fallback to calculating from arrays (old format)
+                items_count = cached_result.get('total_items', len(cached_result.get('items', [])))
+                preview_count = cached_result.get('total_preview_images', len(cached_result.get('preview_images', [])))
+                video_count = cached_result.get('total_video_links', len(cached_result.get('video_links', [])))
+                
+                total_content = items_count + preview_count + video_count
                 
                 if total_content > 0:
                     logger.info(f"✓ Using cached content for: {creator_name} ({total_content} items)")
@@ -171,7 +172,8 @@ class ContentManager:
                 'start_page': scrape_result['start_page'],
                 'end_page': scrape_result['end_page'],
                 'has_more_pages': scrape_result['has_more_pages'],
-                'social_links': scrape_result.get('social_links', {})  # Pass through social links
+                'social_links': scrape_result.get('social_links', {}),  # Pass through social links
+                'url': scrape_result['url']  # Add URL for cache key
             }
             
             # Save to persistent cache for future use
@@ -180,6 +182,9 @@ class ContentManager:
                     'items': content_items,
                     'preview_images': preview_items,
                     'video_links': video_items,
+                    'total_items': len(content_items),
+                    'total_preview_images': len(preview_items),
+                    'total_video_links': len(video_items),
                     'total_pages': scrape_result['total_pages'],
                     'social_links': scrape_result.get('social_links', {})
                 }
