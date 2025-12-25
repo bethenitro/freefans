@@ -35,6 +35,9 @@ HELP_TEXT = """
 🔍 Search Creator
 Type any creator's name and I'll find their hottest content. The search is smart - even partial names work!
 
+🎲 Random Creator
+Get a random creator with lots of content (25+ items). Perfect for discovering new creators!
+
 📝 Request Creator
 Don't see a creator? Request them to be added! I'll need:
   • Social media platform (OnlyFans, Instagram, etc.)
@@ -66,6 +69,7 @@ def create_main_menu_keyboard():
     """Create the main menu reply keyboard"""
     keyboard = [
         [KeyboardButton("🔍 Search Creator")],
+        [KeyboardButton("🎲 Random Creator")],
         [KeyboardButton("📝 Request Creator"), KeyboardButton("🎯 Request Content")],
         [KeyboardButton("❓ Help")]
     ]

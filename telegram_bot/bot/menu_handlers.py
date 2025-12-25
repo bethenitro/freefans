@@ -5,7 +5,6 @@ Menu Handlers - Handles reply keyboard button presses and request system
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
-from bot.command_handlers import create_main_menu_keyboard, HELP_TEXT
 from bot.utilities import send_message_with_retry
 from managers.request_manager import get_request_manager
 
@@ -30,6 +29,10 @@ async def handle_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE,
     # Handle menu buttons
     if message_text == "🔍 Search Creator":
         await handle_search_button(update, context, session)
+        return True
+    
+    elif message_text == "🎲 Random Creator":
+        await handle_random_creator_button(update, context, session, bot_instance)
         return True
     
     elif message_text == "📝 Request Creator":
@@ -57,6 +60,87 @@ async def handle_search_button(update: Update, context: ContextTypes.DEFAULT_TYP
         "Please enter the creator's name:\n\n"
         "📝 Send /cancel to cancel"
     )
+
+
+async def handle_random_creator_button(update: Update, context: ContextTypes.DEFAULT_TYPE, session, bot_instance):
+    """Handle Random Creator button press"""
+    try:
+        # Show loading message
+        loading_msg = await update.message.reply_text(
+            "🎲 Finding a random creator with lots of content...\n\n"
+            "⏳ Please wait..."
+        )
+        
+        # Get random creator from content manager
+        content_manager = bot_instance.content_manager
+        random_creator = await content_manager.get_random_creator_with_content(min_items=25)
+        
+        if random_creator:
+            creator_name = random_creator['name']
+            item_count = random_creator['item_count']
+            
+            # Set up session for this creator
+            session.pending_creator_name = creator_name
+            session.pending_creator_options = None
+            
+            # Delete loading message
+            try:
+                await loading_msg.delete()
+            except:
+                pass
+            
+            # Show creator info and start content search
+            await update.message.reply_text(
+                f"🎲 Random Creator Found!\n\n"
+                f"👤 Creator: {creator_name}\n"
+                f"📊 Content Items: {item_count}\n\n"
+                f"🔍 Searching for content..."
+            )
+            
+            # Trigger content search automatically
+            filters = {'content_type': 'all', 'date_range': 'all', 'quality': 'any'}
+            content_result = await content_manager.search_creator_content(creator_name, filters)
+            
+            if content_result:
+                # Import here to avoid circular imports
+                from bot.callback_handlers import display_content_directory
+                await display_content_directory(update, context, content_result, bot_instance)
+            else:
+                from bot.command_handlers import create_main_menu_keyboard
+                await update.message.reply_text(
+                    f"❌ Sorry, couldn't load content for {creator_name} right now.\n\n"
+                    f"Try again or use 🔍 Search Creator to find someone specific.",
+                    reply_markup=create_main_menu_keyboard()
+                )
+        else:
+            # Delete loading message
+            try:
+                await loading_msg.delete()
+            except:
+                pass
+            
+            from bot.command_handlers import create_main_menu_keyboard
+            await update.message.reply_text(
+                "😔 No creators found with enough content (25+ items).\n\n"
+                "Try using 🔍 Search Creator to find someone specific!",
+                reply_markup=create_main_menu_keyboard()
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in random creator handler: {e}")
+        
+        # Delete loading message if it exists
+        try:
+            await loading_msg.delete()
+        except:
+            pass
+        
+        from bot.command_handlers import create_main_menu_keyboard
+        await update.message.reply_text(
+            "❌ Something went wrong while finding a random creator.\n\n"
+            "Please try again or use 🔍 Search Creator.",
+            reply_markup=create_main_menu_keyboard()
+        )
 
 
 async def handle_request_creator_button(update: Update, context: ContextTypes.DEFAULT_TYPE, session):
@@ -97,6 +181,7 @@ async def handle_request_content_button(update: Update, context: ContextTypes.DE
 
 async def handle_help_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle Help button press"""
+    from bot.command_handlers import create_main_menu_keyboard, HELP_TEXT
     reply_markup = create_main_menu_keyboard()
     await send_message_with_retry(
         update.message.reply_text,
@@ -153,6 +238,7 @@ async def handle_request_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         logger.info(f"Creator request {request_id} from user {user_id}: {platform} - {username}")
         
+        from bot.command_handlers import create_main_menu_keyboard
         reply_markup = create_main_menu_keyboard()
         await update.message.reply_text(
             f"✅ Request Submitted!\n\n"
@@ -215,6 +301,7 @@ async def handle_request_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         logger.info(f"Content request {request_id} from user {user_id}: {platform} - {username}")
         
+        from bot.command_handlers import create_main_menu_keyboard
         reply_markup = create_main_menu_keyboard()
         await update.message.reply_text(
             f"✅ Content Request Submitted!\n\n"

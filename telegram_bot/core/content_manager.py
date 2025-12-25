@@ -487,3 +487,17 @@ class ContentManager:
             'cache_size': len(self.cache),
             'cached_creators': list(self.cache.keys())
         }
+    
+    async def get_random_creator_with_content(self, min_items: int = 25) -> Optional[Dict]:
+        """Get a random creator with at least min_items content items."""
+        try:
+            random_creator = self.cache_manager.get_random_creator_with_content(min_items)
+            if random_creator:
+                logger.info(f"Found random creator: {random_creator['name']} ({random_creator['item_count']} items)")
+                return random_creator
+            else:
+                logger.info(f"No creators found with at least {min_items} items")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting random creator: {e}")
+            return None

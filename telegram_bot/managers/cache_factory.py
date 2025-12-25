@@ -429,3 +429,29 @@ class SupabaseCacheManager:
         except Exception as e:
             print(f"❌ Error cleaning up empty creators: {e}")
             return 0
+    
+    def get_random_creator_with_content(self, min_items: int = 25) -> dict:
+        """Get a random creator with at least min_items content items."""
+        try:
+            if not self.supabase_available:
+                return None
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            
+            db = get_db_session_sync()
+            try:
+                creator = crud.get_random_creator_with_content(db, min_items)
+                if creator:
+                    return {
+                        'name': creator.name,
+                        'url': f"https://simpcity.su/threads/{creator.name.lower().replace(' ', '-')}.123456/",
+                        'last_scraped': creator.last_scraped.isoformat() if creator.last_scraped else None,
+                        'item_count': creator.post_count or 0
+                    }
+                return None
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"❌ Error getting random creator: {e}")
+            return None

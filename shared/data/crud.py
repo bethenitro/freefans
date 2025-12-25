@@ -522,3 +522,21 @@ def get_recent_landing_pages(db: Session, cutoff_time: datetime) -> List[Landing
     except Exception as e:
         logger.error(f"✗ Failed to get recent landing pages: {e}")
         return []
+
+def get_random_creator_with_content(db: Session, min_items: int = 25) -> Optional[Creator]:
+    """Get a random creator with at least min_items content items."""
+    try:
+        # Get a random creator with sufficient content
+        creator = db.query(Creator).filter(
+            Creator.post_count >= min_items
+        ).order_by(func.random()).first()
+        
+        if creator:
+            logger.info(f"✓ Found random creator: {creator.name} ({creator.post_count} items)")
+        else:
+            logger.info(f"⚠️ No creators found with at least {min_items} items")
+        
+        return creator
+    except Exception as e:
+        logger.error(f"✗ Failed to get random creator: {e}")
+        return None
