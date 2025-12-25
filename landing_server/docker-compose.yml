@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: freefans-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  landing-server:
+    build:
+      context: ..
+      dockerfile: landing_server/Dockerfile
+    image: freefans-landing-server:latest
+    container_name: freefans-landing-server
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "${LANDING_PORT:-8001}:8001"
+    environment:
+      LANDING_HOST: 0.0.0.0
+      LANDING_PORT: 8001
+      LANDING_BASE_URL: ${LANDING_BASE_URL:-http://localhost:8001}
+      LANDING_SECRET_KEY: ${LANDING_SECRET_KEY}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@localhost:5672//}
+      SUPABASE_DATABASE_URL: ${SUPABASE_DATABASE_URL}
+    healthcheck:
+      # Use Python stdlib for healthcheck (curl isn't installed in the slim image)
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5); sys.exit(0)\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: landing_server/Dockerfile.celery
+    image: freefans-celery-worker:latest
+    container_name: freefans-celery-worker
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@localhost:5672//}
+      SUPABASE_DATABASE_URL: ${SUPABASE_DATABASE_URL}
+      LANDING_BASE_URL: ${LANDING_BASE_URL:-http://localhost:8001}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A landing_server.services.celery_app inspect ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Notifier service: waits for landing-server health endpoint and prints a message
+  startup-notifier:
+    image: curlimages/curl:8.4.0
+    container_name: freefans-startup-notifier
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      for i in $(seq 1 60); do
+        if curl -fsS http://landing-server:8001/health; then
+          echo "✅ All services are healthy";
+          exit 0;
+        fi;
+        sleep 2;
+      done;
+      echo "⚠️ Services did not become healthy in time";
+      exit 1
+
+volumes:
+  rabbitmq-data:
+    name: freefans-rabbitmq-data

@@ -75,7 +75,7 @@ def _cache_content(url: str, start_page: int, max_pages: int, data: Dict):
 class SimpleCityScraper:
     """Main scraper class that coordinates all Fetching operations."""
     
-    def __init__(self, curl_config_path: str = 'config/curl_config.txt'):
+    def __init__(self, curl_config_path: str = 'shared/config/curl_config.txt'):
         self.fetcher = HTTPFetcher(curl_config_path)
     
     async def close(self):

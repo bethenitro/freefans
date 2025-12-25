@@ -44,7 +44,7 @@ class ContentManager:
         """
         try:
             # Always check persistent cache first
-            cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24)
+            cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24*365)  # Always return cache
             if cached_result:
                 # Check if cached result has actual content (not empty cache)
                 # Try to get totals first (new format), fallback to calculating from arrays (old format)

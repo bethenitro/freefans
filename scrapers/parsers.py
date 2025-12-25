@@ -64,7 +64,7 @@ def _get_cached_parse(html: str, cache_key: str):
 def _cache_parse_result(html: str, cache_key: str, data):
     """Cache parse result."""
     html_hash = _get_html_hash(html)
-    full_key = f"{cache_key}_{hash}"
+    full_key = f"{cache_key}_{html_hash}"
     _html_parse_cache[full_key] = {
         'data': data,
         'timestamp': datetime.now()
@@ -191,7 +191,7 @@ def is_valid_content_image(image_url: str, min_size_indicator: int = 300) -> boo
     return True
 
 
-def load_video_domains(file_path: str = 'config/video_domains.txt') -> List[str]:
+def load_video_domains(file_path: str = 'shared/config/video_domains.txt') -> List[str]:
     """Load video hosting domains from configuration file."""
     domains = []
     try:
@@ -215,7 +215,7 @@ def load_video_domains(file_path: str = 'config/video_domains.txt') -> List[str]
     return domains
 
 
-def load_content_domains(file_path: str = 'config/content_domains.txt') -> List[str]:
+def load_content_domains(file_path: str = 'shared/config/content_domains.txt') -> List[str]:
     """Load content hosting domains from configuration file."""
     domains = []
     try:

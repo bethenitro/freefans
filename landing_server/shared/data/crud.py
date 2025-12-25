@@ -77,10 +77,32 @@ def update_creator_content(db: Session, name: str, content: Dict[str, Any]) -> O
         raise
 
 def get_creator_content(db: Session, name: str, max_age_hours: int = 24) -> Optional[Dict[str, Any]]:
-    """Get creator content (no age restrictions)."""
+    """Get creator content if within max age."""
     creator = get_creator_by_name(db, name)
     if not creator:
         return None
+    
+    # Check if content is fresh enough
+    if creator.last_scraped:
+        try:
+            # Handle timezone-aware vs timezone-naive datetime comparison
+            now = datetime.utcnow()
+            last_scraped = creator.last_scraped
+            
+            # If last_scraped is timezone-aware, make now timezone-aware too
+            if last_scraped.tzinfo is not None:
+                from datetime import timezone
+                now = now.replace(tzinfo=timezone.utc)
+            # If last_scraped is timezone-naive but now is timezone-aware, make both naive
+            elif now.tzinfo is not None:
+                now = now.replace(tzinfo=None)
+            
+            age = now - last_scraped
+            if age.total_seconds() > max_age_hours * 3600:
+                logger.info(f"Creator {name} content is stale ({age.total_seconds()/3600:.1f}h old)")
+                return None
+        except Exception as e:
+            logger.warning(f"Error checking age for creator {name}: {e}, returning content anyway")
     
     try:
         content = json.loads(creator.content) if creator.content else None

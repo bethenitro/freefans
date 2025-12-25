@@ -1,0 +1,51 @@
+# Celery Worker Dockerfile for Landing Server
+FROM python:3.10-slim
+
+# Install system dependencies
+RUN apt-get update \
+     && apt-get install -y --no-install-recommends \
+         build-essential \
+         gcc \
+         g++ \
+         libpq-dev \
+     && rm -rf /var/lib/apt/lists/*
+
+# Working dir
+WORKDIR /app
+
+# Environment and venv
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    VIRTUAL_ENV=/opt/venv
+
+RUN python -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Copy and install requirements into venv
+COPY landing_server/requirements.txt /tmp/requirements.txt
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir -r /tmp/requirements.txt \
+    && rm -f /tmp/requirements.txt
+
+# Copy shared and application code
+COPY shared /app/shared
+COPY landing_server /app/landing_server
+
+# Create non-root user
+RUN groupadd -r app && useradd -r -g app -d /home/app -s /sbin/nologin app \
+    && mkdir -p /home/app \
+    && chown -R app:app /app /home/app
+
+# Set working directory to app root (so module imports work)
+WORKDIR /app
+
+# Print a build-time message so the builder logs show completion
+RUN echo "✅ celery-worker image build complete"
+
+# Use non-root user for runtime
+USER app
+
+# Run Celery worker
+CMD ["celery", "-A", "landing_server.services.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=1000", "--time-limit=300", "--soft-time-limit=240"]

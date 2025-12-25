@@ -22,9 +22,6 @@ from bot.ui_components import (
 )
 
 # Add landing_server to path for landing service access
-landing_server_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'landing_server')
-if landing_server_path not in sys.path:
-    sys.path.insert(0, landing_server_path)
 from services.landing_service import landing_service
 
 logger = logging.getLogger(__name__)

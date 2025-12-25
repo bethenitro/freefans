@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  telegram-bot:
+    build:
+      context: ..
+      dockerfile: telegram_bot/Dockerfile
+    container_name: freefans-telegram-bot
+    restart: unless-stopped
+    environment:
+      # Telegram Bot Configuration
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - BOT_NAME=${BOT_NAME:-FreeFansBot}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+      # Background Scraper Configuration
+      - CACHE_REFRESH_INTERVAL_HOURS=${CACHE_REFRESH_INTERVAL_HOURS:-12}
+      - SCRAPER_MAX_WORKERS=${SCRAPER_MAX_WORKERS:-6}
+      - SCRAPER_BATCH_SIZE=${SCRAPER_BATCH_SIZE:-4}
+      - SCRAPER_CONCURRENT_REQUESTS=${SCRAPER_CONCURRENT_REQUESTS:-3}
+      
+      # Supabase Database Configuration
+      - SUPABASE_DATABASE_URL=${SUPABASE_DATABASE_URL}
+      
+      # Landing Server Configuration (for bot to generate links)
+      - LANDING_ENABLED=${LANDING_ENABLED:-true}
+      - LANDING_BASE_URL=${LANDING_BASE_URL:-http://localhost:8001}
+    
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Notifier service to print a confirmation once the telegram-bot service is up
+  startup-notifier-bot:
+    image: busybox:1.36
+    container_name: freefans-startup-notifier-bot
+    restart: "no"
+    depends_on:
+      telegram-bot:
+        condition: service_started
+    command: ["/bin/sh", "-c", "sleep 2; echo '✅ Telegram bot container started'"]

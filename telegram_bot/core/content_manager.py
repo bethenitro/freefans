@@ -12,9 +12,6 @@ from core.content_scraper import SimpleCityScraper
 from managers.cache_factory import get_cache_manager
 
 # Add landing_server to path for landing service access
-landing_server_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'landing_server')
-if landing_server_path not in sys.path:
-    sys.path.insert(0, landing_server_path)
 from services.landing_service import landing_service
 
 logger = logging.getLogger(__name__)
@@ -50,52 +47,57 @@ class ContentManager:
             cache_only: If True (default), only return cached data, no external requests
         """
         try:
-            # Always check persistent cache first
-            cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24)
-            if cached_result:
-                # Check if cached result has actual content (not empty cache)
-                # Try to get totals first (new format), fallback to calculating from arrays (old format)
-                items_count = cached_result.get('total_items', len(cached_result.get('items', [])))
-                preview_count = cached_result.get('total_preview_images', len(cached_result.get('preview_images', [])))
-                video_count = cached_result.get('total_video_links', len(cached_result.get('video_links', [])))
+            # Check if we should use cache or force fresh scraping
+            if cache_only:
+                # Always check persistent cache first when cache_only=True
+                cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24)
+                if cached_result:
+                    # Check if cached result has actual content (not empty cache)
+                    # Try to get totals first (new format), fallback to calculating from arrays (old format)
+                    items_count = cached_result.get('total_items', len(cached_result.get('items', [])))
+                    preview_count = cached_result.get('total_preview_images', len(cached_result.get('preview_images', [])))
+                    video_count = cached_result.get('total_video_links', len(cached_result.get('video_links', [])))
+                    
+                    total_content = items_count + preview_count + video_count
+                    
+                    if total_content > 0:
+                        logger.info(f"✓ Using cached content for: {creator_name} ({total_content} items)")
+                        # Apply filters to cached content
+                        filtered_result = self._apply_filters_to_result(cached_result, filters)
+                        return filtered_result
+                    else:
+                        logger.info(f"⚠️  Cached content for {creator_name} is empty (0 items), will fetch fresh data")
+                        # Don't use empty cache, treat as cache miss and fetch if allowed
+                        cached_result = None
                 
-                total_content = items_count + preview_count + video_count
-                
-                if total_content > 0:
-                    logger.info(f"✓ Using cached content for: {creator_name} ({total_content} items)")
-                    # Apply filters to cached content
-                    filtered_result = self._apply_filters_to_result(cached_result, filters)
-                    return filtered_result
-                else:
-                    logger.info(f"⚠️  Cached content for {creator_name} is empty (0 items), will fetch fresh data")
-                    # Don't use empty cache, treat as cache miss and fetch if allowed
-                    cached_result = None
+                # If cache_only mode and no valid cache, return cache miss
+                if not cached_result:
+                    logger.info(f"⚠️  No cached content for: {creator_name} (cache-only mode, not fetching)")
+                    return {
+                        'creator': creator_name,
+                        'similarity': 0.0,
+                        'needs_confirmation': False,
+                        'last_updated': None,
+                        'total_items': 0,
+                        'items': [],
+                        'preview_images': [],
+                        'total_preview_images': 0,
+                        'video_links': [],
+                        'total_video_links': 0,
+                        'pages_scraped': 0,
+                        'total_pages': 0,
+                        'start_page': 1,
+                        'end_page': 0,
+                        'has_more_pages': False,
+                        'social_links': {},
+                        'from_cache': False,
+                        'cache_miss': True
+                    }
+            else:
+                # cache_only=False: Force fresh scraping, skip cache
+                logger.info(f"Forcing fresh scrape for: {creator_name} (cache_only=False)")
             
-            # If cache_only mode and no valid cache, return cache miss
-            if cache_only and not cached_result:
-                logger.info(f"⚠️  No cached content for: {creator_name} (cache-only mode, not fetching)")
-                return {
-                    'creator': creator_name,
-                    'similarity': 0.0,
-                    'needs_confirmation': False,
-                    'last_updated': None,
-                    'total_items': 0,
-                    'items': [],
-                    'preview_images': [],
-                    'total_preview_images': 0,
-                    'video_links': [],
-                    'total_video_links': 0,
-                    'pages_scraped': 0,
-                    'total_pages': 0,
-                    'start_page': 1,
-                    'end_page': 0,
-                    'has_more_pages': False,
-                    'social_links': {},
-                    'from_cache': False,
-                    'cache_miss': True
-                }
-            
-            # Fallback: Use real scraper to get content (only if cache_only=False)
+            # Use real scraper to get content (only if cache_only=False)
             logger.info(f"Fetching content for creator: {creator_name}, pages {start_page}-{start_page + max_pages - 1}")
             scrape_result = await self.scraper.scrape_creator_content(creator_name, max_pages=max_pages, start_page=start_page, direct_url=direct_url)
             

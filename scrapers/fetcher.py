@@ -124,7 +124,7 @@ def _get_random_headers() -> Dict[str, str]:
 
 
 class HTTPFetcher:
-    def __init__(self, curl_config_path: str = 'config/curl_config.txt'):
+    def __init__(self, curl_config_path: str = 'shared/config/curl_config.txt'):
         """Initialize HTTP fetcher with enhanced multithreading and rate limiting."""
         headers, cookies = self._load_curl_config(curl_config_path)
         self.base_headers = headers

@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+celerylogs.txt
+
+# Data and Cache
+static/cached_previews/*
+!static/cached_previews/.gitkeep
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+Dockerfile.celery
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+
+# Shell scripts
+*.sh
