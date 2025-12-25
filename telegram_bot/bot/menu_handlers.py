@@ -103,8 +103,8 @@ async def handle_random_creator_button(update: Update, context: ContextTypes.DEF
             
             if content_result:
                 # Import here to avoid circular imports
-                from bot.callback_handlers import display_content_directory
-                await display_content_directory(update, context, content_result, bot_instance)
+                from bot.search_handler import display_content_directory
+                await display_content_directory(update, bot_instance, content_result, creator_name)
             else:
                 from bot.command_handlers import create_main_menu_keyboard
                 await update.message.reply_text(
