@@ -47,6 +47,18 @@ class BotLandingService:
             await self._client.aclose()
             self._client = None
     
+    def _convert_localhost_url(self, url: str) -> str:
+        """Convert localhost URL to external domain URL"""
+        if not url:
+            return url
+            
+        # Replace localhost:8001 with the configured base URL
+        if url.startswith('http://localhost:8001'):
+            external_base = self.base_url.rstrip('/')
+            return url.replace('http://localhost:8001', external_base)
+        
+        return url
+    
     async def generate_landing_url_async(
         self, 
         creator_name: str, 
@@ -91,10 +103,12 @@ class BotLandingService:
             if response.status_code == 200:
                 result = response.json()
                 landing_url = result['landing_url']
+                # Convert localhost URL to external domain
+                landing_url = self._convert_localhost_url(landing_url)
                 has_preview = result.get('preview_url') is not None
                 logger.debug(f"✅ Generated landing URL via FastAPI: {landing_url}{' (with preview)' if has_preview else ''}")
                 
-                # Return just the landing URL (preview is used internally by landing page)
+                # Return the converted landing URL
                 return landing_url
             else:
                 error_msg = f"FastAPI server error (status {response.status_code}): {response.text}"
@@ -151,7 +165,8 @@ class BotLandingService:
             
             if response.status_code == 200:
                 result = response.json()
-                urls = [item['landing_url'] for item in result['results']]
+                # Convert all localhost URLs to external domain
+                urls = [self._convert_localhost_url(item['landing_url']) for item in result['results']]
                 logger.debug(f"✅ Generated {len(urls)} batch landing URLs via FastAPI")
                 return urls
             else:

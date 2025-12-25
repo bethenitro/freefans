@@ -47,9 +47,8 @@ class ContentManager:
             cache_only: If True (default), only return cached data, no external requests
         """
         try:
-            # Check if we should use cache or force fresh scraping
+            # Always check cache first (unless cache_only=False for forced refresh)
             if cache_only:
-                # Always check persistent cache first when cache_only=True
                 cached_result = self.cache_manager.get_creator_cache(creator_name, max_age_hours=24)
                 if cached_result:
                     # Check if cached result has actual content (not empty cache)
@@ -67,37 +66,14 @@ class ContentManager:
                         return filtered_result
                     else:
                         logger.info(f"⚠️  Cached content for {creator_name} is empty (0 items), will fetch fresh data")
-                        # Don't use empty cache, treat as cache miss and fetch if allowed
-                        cached_result = None
                 
-                # If cache_only mode and no valid cache, return cache miss
-                if not cached_result:
-                    logger.info(f"⚠️  No cached content for: {creator_name} (cache-only mode, not fetching)")
-                    return {
-                        'creator': creator_name,
-                        'similarity': 0.0,
-                        'needs_confirmation': False,
-                        'last_updated': None,
-                        'total_items': 0,
-                        'items': [],
-                        'preview_images': [],
-                        'total_preview_images': 0,
-                        'video_links': [],
-                        'total_video_links': 0,
-                        'pages_scraped': 0,
-                        'total_pages': 0,
-                        'start_page': 1,
-                        'end_page': 0,
-                        'has_more_pages': False,
-                        'social_links': {},
-                        'from_cache': False,
-                        'cache_miss': True
-                    }
+                # No valid cache found - automatically fetch fresh data
+                logger.info(f"⚠️  No cached content for: {creator_name} - fetching fresh data automatically")
             else:
-                # cache_only=False: Force fresh scraping, skip cache
+                # cache_only=False: Force fresh scraping, skip cache check
                 logger.info(f"Forcing fresh scrape for: {creator_name} (cache_only=False)")
             
-            # Use real scraper to get content (only if cache_only=False)
+            # Fetch fresh content from scraper
             logger.info(f"Fetching content for creator: {creator_name}, pages {start_page}-{start_page + max_pages - 1}")
             scrape_result = await self.scraper.scrape_creator_content(creator_name, max_pages=max_pages, start_page=start_page, direct_url=direct_url)
             

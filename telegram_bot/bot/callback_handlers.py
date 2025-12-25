@@ -177,7 +177,7 @@ async def handle_search_creator(query, session) -> None:
 async def handle_search_on_simpcity(query, session, bot_instance) -> None:
     """Handle extended search request when CSV results don't match."""
     if not session.pending_creator_name:
-        await query.edit_message_text("❌ No search query found. Please start a new search.")
+        await query.edit_message_text("⚠️ Please start a new search.")
         return
     
     creator_name = session.pending_creator_name
@@ -231,8 +231,7 @@ async def handle_search_on_simpcity(query, session, bot_instance) -> None:
     except Exception as e:
         logger.error(f"Error in extended search: {e}")
         await query.edit_message_text(
-            "❌ An error occurred during the extended search.\n\n"
-            "Please try again later."
+            "⚠️ Server issue - please try again later."
         )
 
 async def handle_creator_page_change(query, session, data: str) -> None:
@@ -247,12 +246,12 @@ async def handle_creator_page_change(query, session, data: str) -> None:
         
     except (IndexError, ValueError) as e:
         logger.error(f"Error handling creator page change: {e}")
-        await query.answer("❌ Error changing page", show_alert=True)
+        await query.answer("⚠️ Server issue - please try again", show_alert=True)
 
 async def handle_select_creator(query, session, data: str, bot_instance) -> None:
     """Handle user selection of a creator from multiple options."""
     if not session.pending_creator_options:
-        await query.edit_message_text("❌ No creator options available. Please search again.")
+        await query.edit_message_text("⚠️ Server issue - please search again.")
         return
     
     # Extract the selected index
@@ -260,7 +259,7 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         selected_idx = int(data.split("|")[1])
         selected_option = session.pending_creator_options[selected_idx]
     except (IndexError, ValueError):
-        await query.edit_message_text("❌ Invalid selection. Please try again.")
+        await query.edit_message_text("⚠️ Server issue - please try again.")
         return
     
     creator_name = selected_option['name']
@@ -289,7 +288,7 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
             creator_name,
             session.filters,
             direct_url=creator_url,
-            cache_only=False  # Enable on-demand caching for new queries
+            cache_only=True  # Check cache first, only scrape if not cached
         )
     )
     
@@ -312,16 +311,7 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         if not content_directory:
             await query.edit_message_text(
                 f"❌ Failed to load content for '{creator_name}'.\n\n"
-                "Please try again later."
-            )
-            return
-        
-        # Check if it's a cache miss
-        if content_directory.get('cache_miss'):
-            await query.edit_message_text(
-                f"📭 Content for '{creator_name}' is not cached yet.\n\n"
-                f"🔄 This creator will be added to the cache during the next refresh cycle.\n\n"
-                f"💡 Tip: Try searching for another creator or check back in a few hours!"
+                "⚠️ Server issue - please try again later."
             )
             return
         
@@ -385,7 +375,7 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
 async def handle_select_simpcity(query, session, data: str, bot_instance) -> None:
     """Handle user selection of a creator from extended search results."""
     if not session.pending_creator_options:
-        await query.edit_message_text("❌ No creator options available. Please search again.")
+        await query.edit_message_text("⚠️ Please search again.")
         return
     
     # Extract the selected index
@@ -393,7 +383,7 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
         selected_idx = int(data.split("|")[1])
         selected_option = session.pending_creator_options[selected_idx]
     except (IndexError, ValueError):
-        await query.edit_message_text("❌ Invalid selection. Please try again.")
+        await query.edit_message_text("⚠️ Please try again.")
         return
     
     # Extract creator name from title (clean it up)
@@ -435,7 +425,7 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
             creator_name,
             session.filters,
             direct_url=creator_url,
-            cache_only=False  # Enable on-demand caching for new queries
+            cache_only=True  # Check cache first, only scrape if not cached
         )
     )
     
@@ -581,7 +571,7 @@ async def display_content_directory_from_callback(query, session, content_direct
 async def handle_load_more_pages(query, session, bot_instance) -> None:
     """Handle loading more content for the current creator."""
     if not session.current_directory or not session.current_creator:
-        await query.edit_message_text("❌ No content available.")
+        await query.edit_message_text("⚠️ No content available.")
         return
     
     creator_name = session.current_creator
@@ -657,11 +647,11 @@ async def handle_load_more_pages(query, session, bot_instance) -> None:
             
             # Success message shown in the updated content
         else:
-            await query.edit_message_text("❌ Failed to load more content. Please try again.")
+            await query.edit_message_text("⚠️ Server issue - please try again.")
             
     except Exception as e:
         logger.error(f"Error loading more content: {e}")
-        await query.edit_message_text("❌ An error occurred while loading more content.")
+        await query.edit_message_text("⚠️ Server issue - please try again.")
 
 async def handle_set_filters(query, session) -> None:
     """Show the filters configuration menu."""
@@ -674,7 +664,7 @@ async def handle_content_details(query, session, data: str) -> None:
     content_idx = int(data.split("_")[1])
     
     if not session.current_directory or content_idx >= len(session.current_directory['items']):
-        await query.edit_message_text("❌ Content not found.")
+        await query.edit_message_text("⚠️ Content not found.")
         return
     
     item = session.current_directory['items'][content_idx]
@@ -721,7 +711,7 @@ async def handle_download_request(query, session, data: str, bot_instance) -> No
     content_idx = int(data.split("_")[1])
     
     if not session.current_directory or content_idx >= len(session.current_directory['items']):
-        await query.edit_message_text("❌ Content not found.")
+        await query.edit_message_text("⚠️ Content not found.")
         return
     
     item = session.current_directory['items'][content_idx]
@@ -759,18 +749,18 @@ async def handle_download_request(query, session, data: str, bot_instance) -> No
             
             await query.edit_message_text(link_text, reply_markup=reply_markup, parse_mode='Markdown')
         else:
-            await query.edit_message_text("❌ Failed to generate download link. Please try again later.")
+            await query.edit_message_text("⚠️ Server issue - please try again.")
             
     except Exception as e:
         logger.error(f"Error generating download link: {e}")
-        await query.edit_message_text("❌ An error occurred while generating the download link.")
+        await query.edit_message_text("⚠️ Server issue - please try again.")
 
 async def handle_preview_request(query, session, data: str, bot_instance) -> None:
     """Handle preview request for content."""
     content_idx = int(data.split("_")[1])
     
     if not session.current_directory or content_idx >= len(session.current_directory['items']):
-        await query.edit_message_text("❌ Content not found.")
+        await query.edit_message_text("⚠️ Content not found.")
         return
     
     item = session.current_directory['items'][content_idx]
@@ -805,16 +795,16 @@ async def handle_preview_request(query, session, data: str, bot_instance) -> Non
             
             await query.edit_message_text(preview_text, reply_markup=reply_markup)
         else:
-            await query.edit_message_text("❌ Preview not available for this content.")
+            await query.edit_message_text("⚠️ Preview not available.")
             
     except Exception as e:
         logger.error(f"Error generating preview: {e}")
-        await query.edit_message_text("❌ An error occurred while generating the preview.")
+        await query.edit_message_text("⚠️ Server issue - please try again.")
 
 async def handle_back_to_list(query, session) -> None:
     """Return to the content list view."""
     if not session.current_directory:
-        await query.edit_message_text("❌ No content directory available.")
+        await query.edit_message_text("⚠️ Server issue - please try again.")
         return
     
     creator_name = session.current_creator
@@ -1183,12 +1173,12 @@ async def handle_picture_details(query, session, data: str) -> None:
     picture_idx = int(data.split("_")[1])
     
     if not session.current_directory:
-        await query.edit_message_text("❌ No content directory available.")
+        await query.edit_message_text("⚠️ Server issue - please try again.")
         return
     
     preview_images = session.current_directory.get('preview_images', [])
     if picture_idx >= len(preview_images):
-        await query.edit_message_text("❌ Picture not found.")
+        await query.edit_message_text("⚠️ Content not found.")
         return
     
     picture = preview_images[picture_idx]
@@ -1214,12 +1204,12 @@ async def handle_picture_link(query, session, data: str) -> None:
     picture_idx = int(data.split("_")[2])
     
     if not session.current_directory:
-        await query.edit_message_text("❌ No content directory available.")
+        await query.edit_message_text("⚠️ Server issue - please try again.")
         return
     
     preview_images = session.current_directory.get('preview_images', [])
     if picture_idx >= len(preview_images):
-        await query.edit_message_text("❌ Picture not found.")
+        await query.edit_message_text("⚠️ Content not found.")
         return
     
     picture = preview_images[picture_idx]
@@ -1327,6 +1317,14 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
             landing_urls = await landing_service.generate_batch_landing_urls_async(batch_items)
             batch_time = time.time() - batch_start
             logger.info(f"✅ Received {len(landing_urls)} landing URLs in {batch_time:.2f}s")
+            
+            # Check if we have the right number of URLs
+            if len(landing_urls) != len(page_items):
+                logger.error(f"❌ URL count mismatch: got {len(landing_urls)} URLs for {len(page_items)} items")
+                # Pad with original URLs if needed
+                while len(landing_urls) < len(page_items):
+                    landing_urls.append(page_items[len(landing_urls)].get('url', ''))
+                
         except Exception as e:
             batch_time = time.time() - batch_start
             logger.error(f"❌ Batch request failed after {batch_time:.2f}s: {e}")
@@ -1346,6 +1344,26 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
             
             original_url = item.get('url', '')
             title = item.get('title', f'Video #{start_idx + idx + 1}')
+            
+            # Check if landing URL is valid
+            if not landing_url:
+                logger.error(f"❌ Empty landing URL for video {idx + 1}: {title}")
+                # Send server error message instead of fallback
+                error_message = f"""🎬 {title}
+
+❌ Server Error - Unable to generate link
+Please try again later."""
+                
+                try:
+                    await send_message_with_retry(
+                        query.message.reply_text,
+                        error_message
+                    )
+                    await asyncio.sleep(0.2)
+                except Exception as e:
+                    logger.error(f"Failed to send error message: {e}")
+                
+                return {'text': error_message, 'parse_mode': None, 'disable_web_page_preview': True}
             
             # Check if user is a worker to show original URL
             permissions = get_permissions_manager()
@@ -1384,6 +1402,9 @@ async def handle_view_videos(query, session, page: int = 0) -> None:
                 await asyncio.sleep(0.2)
             except Exception as e:
                 logger.error(f"Failed to send video message: {e}")
+                logger.error(f"Message text was: {message_text}")
+            
+            return message_data
             
             return message_data
         
@@ -1597,7 +1618,7 @@ async def handle_video_goto(query, session, data: str) -> None:
 async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> None:
     """Show OnlyFans feed posts from Coomer API."""
     if not session.current_directory:
-        await query.edit_message_text("❌ No content directory available.")
+        await query.edit_message_text("⚠️ Server issue - please try again.")
         return
     
     # Extract OnlyFans username from social links
@@ -1615,7 +1636,7 @@ async def handle_view_of_feed(query, session, bot_instance, page: int = 0) -> No
     import re
     username_match = re.search(r'onlyfans\.com/([^/?]+)', onlyfans_link)
     if not username_match:
-        await query.edit_message_text("❌ Could not extract OnlyFans username from link.")
+        await query.edit_message_text("⚠️ Invalid link - please check and try again.")
         return
     
     username = username_match.group(1)
@@ -1724,11 +1745,11 @@ The archive database is currently blocking automated requests for @{username}.
                 return
         
         except httpx.TimeoutException:
-            await query.edit_message_text("❌ Request timed out. The archive server may be slow. Please try again.")
+            await query.edit_message_text("⚠️ Server issue - please try again.")
             return
         except Exception as e:
             logger.error(f"Error fetching archived feed: {e}")
-            await query.edit_message_text("❌ An error occurred while fetching the archived feed.")
+            await query.edit_message_text("⚠️ Server issue - please try again.")
             return
     
     # Store posts in session for pagination
@@ -2064,7 +2085,7 @@ async def handle_of_feed_page(query, session, data: str, bot_instance) -> None:
     page = int(data.split("_")[3])
     
     if not hasattr(session, 'of_feed_posts') or not session.of_feed_posts:
-        await query.edit_message_text("❌ Archived feed data not available. Please reload the feed.")
+        await query.edit_message_text("⚠️ Please reload the feed.")
         return
     
     await display_of_feed_page(query, session, page)
@@ -2074,7 +2095,7 @@ async def handle_of_feed_skip_menu(query, session, data: str) -> None:
     current_page = int(data.split("_")[3])
     
     if not hasattr(session, 'of_feed_posts') or not session.of_feed_posts:
-        await query.edit_message_text("❌ Archived feed data not available.")
+        await query.edit_message_text("⚠️ Please reload the feed.")
         return
     
     posts = session.of_feed_posts
@@ -2211,7 +2232,7 @@ async def handle_of_feed_cancel(query, session, data: str) -> None:
 async def show_of_feed_navigation(query, session, page: int) -> None:
     """Show only the navigation menu for Onlyfans Feed without re-sending posts."""
     if not hasattr(session, 'of_feed_posts') or not session.of_feed_posts:
-        await query.edit_message_text("❌ Archived feed data not available.")
+        await query.edit_message_text("⚠️ Please reload the feed.")
         return
     
     posts = session.of_feed_posts
