@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}FreeFans Landing Server{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6 col-md-8">
+        <div class="content-card p-5 text-center">
+            <h1 class="mb-4">
+                <i class="fas fa-rocket"></i> FreeFans
+            </h1>
+            <p class="lead mb-4">
+                Premium content landing server is running successfully!
+            </p>
+            
+            <div class="row mb-4">
+                <div class="col-6">
+                    <div class="stats-item">
+                        <div class="stats-number text-success">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="stats-label">Server Online</div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="stats-item">
+                        <div class="stats-number text-primary">
+                            <i class="fas fa-shield-alt"></i>
+                        </div>
+                        <div class="stats-label">Secure Links</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="ad-banner">
+                <h5><i class="fas fa-info-circle"></i> How it works</h5>
+                <p class="mb-0">
+                    This server creates secure landing pages for content access. 
+                    Users see previews and ads before accessing the original content.
+                </p>
+            </div>
+        </div>
+        
+        <div class="footer-info">
+            <p class="mb-2">
+                <i class="fas fa-cog"></i> 
+                FastAPI Landing Server v1.0.0
+            </p>
+            <small>
+                Ready to serve landing pages for your Telegram bot!
+            </small>
+        </div>
+    </div>
+</div>
+{% endblock %}
