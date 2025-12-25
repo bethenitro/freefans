@@ -1,0 +1,9 @@
+# Video hosting domains for extraction
+# Add one domain per line
+# Lines starting with # are comments
+
+bunkr.
+gofile.
+cdn.bunkr
+cdn9.bunkr
+saint2.cr

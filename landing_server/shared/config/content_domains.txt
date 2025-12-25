@@ -1,0 +1,8 @@
+# Content hosting domains for extraction (images, etc.)
+# Add one domain per line
+# Lines starting with # are comments
+
+imgur.
+jpg6.su
+simp
+delivery

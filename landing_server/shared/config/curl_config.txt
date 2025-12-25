@@ -1,0 +1,15 @@
+curl 'https://simpcity.cr/' \
+  --compressed \
+  -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0' \
+  -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' \
+  -H 'Accept-Language: en-US,en;q=0.5' \
+  -H 'Accept-Encoding: gzip, deflate, br, zstd' \
+  -H 'Referer: https://simpcity.cr/login/' \
+  -H 'Sec-GPC: 1' \
+  -H 'Upgrade-Insecure-Requests: 1' \
+  -H 'Sec-Fetch-Dest: document' \
+  -H 'Sec-Fetch-Mode: navigate' \
+  -H 'Sec-Fetch-Site: same-origin' \
+  -H 'Sec-Fetch-User: ?1' \
+  -H 'Connection: keep-alive' \
+  -H 'Cookie: __ddg8_=hswhW9T0l9lsF4Eh; __ddg10_=1766569722; __ddg9_=205.147.22.20; __ddg1_=0QmZzX3SZWtlQBkXJuMp; cucksid=da8ed95e38336162b2da669560e1a3b396dc1948a97197ecd0d27f6f7639860e; cucksed=b4; ogaddgmetaprof_csrf=19qy7t9rmdWl3eqs; UGVyc2lzdFN0b3JhZ2U=%7B%7D; bnState_2086817=%7B%22impressions%22%3A2%2C%22delayStarted%22%3A0%7D; bnState_2086797=%7B%22impressions%22%3A2%2C%22delayStarted%22%3A0%7D; ogaddgmetaprof_session=3_4FSFQV9nlLbmAXWDL9s66JieaOkw5g; ogaddgmetaprof_user=10836161%2CXGCJZHwrjKO3WnA02cQL6EsYpsn0WkesuxzfGnCW; ogaddgmetaprof_dbWriteForced=1766569719'
