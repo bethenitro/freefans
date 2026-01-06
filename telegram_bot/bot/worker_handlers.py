@@ -54,79 +54,102 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     if replied_message.text:
         text = replied_message.text
         
-        # Try to find URLs in text
-        import re
-        url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
-        urls = re.findall(url_pattern, text)
+        # First check if message has entities (links from markdown)
+        if replied_message.entities:
+            for entity in replied_message.entities:
+                if entity.type == 'text_link':
+                    url = entity.url
+                    # Check if this is the Original Link (should be second link for workers)
+                    if 'bunkr' in url or 'gofile' in url or 'pixeldrain' in url or 'streamtape' in url or \
+                       'streamlare' in url or 'doodstream' in url or 'mixdrop' in url or 'sendvid' in url or \
+                       'filejoker' in url or 'anonfiles' in url or 'cyberdrop' in url or 'mediafire' in url or \
+                       'mega.nz' in url or 'dropbox' in url or 'drive.google' in url or 'coomer.su' in url:
+                        video_url = url
+                        logger.info(f"Extracted video URL from markdown entity: {url[:50]}...")
+                        break
         
-        # Check if this is a video library message (with landing URL or direct video URL)
-        # Format: 🎬 {title}\n\n🔗 Access Link: {landing_url}\n📎 Original: {original_url}
-        if '🎬' in text and urls:
-            # Extract title (first line after 🎬)
+        # Extract title from message (first line after 🎬)
+        if '🎬' in text:
             lines = text.strip().split('\n')
             for line in lines:
                 if '🎬' in line:
                     video_title = line.replace('🎬', '').strip()
                     break
-            
-            # Extract original URL if present (preferred for cache updates)
-            original_url = None
-            for line in lines:
-                if '📎 Original:' in line or '📎Original:' in line:
-                    # Get URL after "Original:"
-                    url_match = re.search(r'Original:\s*(https?://[^\s<>"{}|\\^`\[\]]+)', line)
-                    if url_match:
-                        original_url = url_match.group(1)
-                        break
-            
-            # Use original URL if found, otherwise use landing URL
-            video_url = original_url if original_url else urls[0]
-            
-            logger.info(f"Extracted URLs - Landing: {urls[0][:50]}..., Original: {original_url[:50] if original_url else 'None'}...")
-            
-            # Try to get creator from session
-            if bot_instance and user_id in bot_instance.user_sessions:
-                session = bot_instance.user_sessions[user_id]
-                # Check session.current_creator first
-                if hasattr(session, 'current_creator') and session.current_creator:
-                    creator_name = session.current_creator
-                    logger.info(f"Got creator from session.current_creator: {creator_name}")
-                # Fallback to current_directory if available
-                elif session.current_directory:
-                    creator_name = session.current_directory.get('creator_name')
-                    logger.info(f"Got creator from session.current_directory: {creator_name}")
-            
-            # If still no creator name, mark as Unknown
-            if not creator_name:
-                creator_name = 'Unknown'
-                logger.warning(f"Could not determine creator name from session")
         
-        else:
-            # Look for direct video URLs with common domains
-            video_domains = [
-                'bunkr', 'gofile', 'pixeldrain', 'streamtape', 'streamlare',
-                'doodstream', 'mixdrop', 'sendvid', 'filejoker', 'anonfiles',
-                'cyberdrop', 'mediafire', 'mega.nz', 'dropbox', 'drive.google'
-            ]
-            
-            for url in urls:
-                if any(domain in url.lower() for domain in video_domains):
-                    video_url = url
-                    break
-            
-            # Try to extract creator name from the message
-            if "Creator:" in text or "creator:" in text:
-                lines = text.split('\n')
+        # Try to find URLs in text as fallback
+        if not video_url:
+            import re
+            url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+            urls = re.findall(url_pattern, text)
+        
+            # Check if this is a video library message (with landing URL or direct video URL)
+            # Format: 🎬 {title}\n\n🔗 Access Link: {landing_url}\n📎 Original: {original_url}
+            if '🎬' in text and urls:
+                # Extract title (first line after 🎬)
+                lines = text.strip().split('\n')
                 for line in lines:
-                    if 'creator:' in line.lower():
-                        creator_name = line.split(':', 1)[1].strip()
+                    if '🎬' in line:
+                        video_title = line.replace('🎬', '').strip()
                         break
+                
+                # Extract original URL if present (preferred for cache updates)
+                original_url = None
+                for line in lines:
+                    if '📎 Original:' in line or '📎Original:' in line:
+                        # Get URL after "Original:"
+                        url_match = re.search(r'Original:\s*(https?://[^\s<>"{}|\\^`\[\]]+)', line)
+                        if url_match:
+                            original_url = url_match.group(1)
+                            break
+                
+                # Use original URL if found, otherwise use landing URL
+                video_url = original_url if original_url else urls[0]
+                
+                logger.info(f"Extracted URLs - Landing: {urls[0][:50]}..., Original: {original_url[:50] if original_url else 'None'}...")
+                
+                # Try to get creator from session
+                if bot_instance and user_id in bot_instance.user_sessions:
+                    session = bot_instance.user_sessions[user_id]
+                    # Check session.current_creator first
+                    if hasattr(session, 'current_creator') and session.current_creator:
+                        creator_name = session.current_creator
+                        logger.info(f"Got creator from session.current_creator: {creator_name}")
+                    # Fallback to current_directory if available
+                    elif session.current_directory:
+                        creator_name = session.current_directory.get('creator_name')
+                        logger.info(f"Got creator from session.current_directory: {creator_name}")
+                
+                # If still no creator name, mark as Unknown
+                if not creator_name:
+                    creator_name = 'Unknown'
+                    logger.warning(f"Could not determine creator name from session")
             
-            # Alternative: look for name in first line
-            if not creator_name and urls:
-                parts = text.split(urls[0])[0].strip().split('\n')
-                if parts:
-                    creator_name = parts[0].strip()
+            else:
+                # Look for direct video URLs with common domains
+                video_domains = [
+                    'bunkr', 'gofile', 'pixeldrain', 'streamtape', 'streamlare',
+                    'doodstream', 'mixdrop', 'sendvid', 'filejoker', 'anonfiles',
+                    'cyberdrop', 'mediafire', 'mega.nz', 'dropbox', 'drive.google'
+                ]
+                
+                for url in urls:
+                    if any(domain in url.lower() for domain in video_domains):
+                        video_url = url
+                        break
+                
+                # Try to extract creator name from the message
+                if "Creator:" in text or "creator:" in text:
+                    lines = text.split('\n')
+                    for line in lines:
+                        if 'creator:' in line.lower():
+                            creator_name = line.split(':', 1)[1].strip()
+                            break
+                
+                # Alternative: look for name in first line
+                if not creator_name and urls:
+                    parts = text.split(urls[0])[0].strip().split('\n')
+                    if parts:
+                        creator_name = parts[0].strip()
     
     if not video_url:
         # Not a video message, ignore
