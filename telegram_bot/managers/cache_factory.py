@@ -361,6 +361,30 @@ class SupabaseCacheManager:
             print(f"❌ Error updating video title in Supabase: {e}")
             return False
     
+    def delete_video(self, video_url: str) -> bool:
+        """Delete a video from all creators in Supabase."""
+        try:
+            if not self.supabase_available:
+                return False
+            
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            import logging
+            
+            logger = logging.getLogger(__name__)
+            
+            db = get_db_session_sync()
+            try:
+                result = crud.delete_video_from_creator(db, video_url)
+                if result:
+                    logger.info(f"✓ Deleted video from Supabase: {video_url}")
+                return result
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"❌ Error deleting video from Supabase: {e}")
+            return False
+    
     def is_supabase_available(self) -> bool:
         """Check if Supabase integration is available."""
         from shared.config.database import is_database_available

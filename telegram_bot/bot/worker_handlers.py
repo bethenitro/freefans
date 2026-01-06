@@ -140,6 +140,34 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Get the suggested title from the reply
     suggested_title = update.message.text.strip()
     
+    # Check if worker is reporting video as NOT FOUND
+    if suggested_title.upper() == 'NOT FOUND':
+        from managers.cache_factory import get_cache_manager
+        cache_manager = get_cache_manager()
+        
+        # Delete the video from database
+        success = cache_manager.delete_video(video_url)
+        
+        if success:
+            await update.message.reply_text(
+                f"✅ **Video Removal Confirmed!**\n\n"
+                f"🗑️ The video has been successfully removed from the database.\n"
+                f"🔗 URL: {video_url[:50]}...\n\n"
+                f"Thank you for keeping the database clean! 🧹",
+                parse_mode='Markdown'
+            )
+            logger.info(f"Worker {user_id} marked video as NOT FOUND and deleted: {video_url[:80]}...")
+        else:
+            await update.message.reply_text(
+                f"⚠️ **Video Not Found in Database**\n\n"
+                f"The video may have already been removed or wasn't in the database.\n"
+                f"🔗 URL: {video_url[:50]}...",
+                parse_mode='Markdown'
+            )
+            logger.warning(f"Worker {user_id} tried to delete video but it wasn't found: {video_url[:80]}...")
+        
+        return True
+    
     if not suggested_title or len(suggested_title) < 3:
         await update.message.reply_text(
             "❌ Title too short. Please provide a descriptive title (at least 3 characters)."
@@ -165,12 +193,13 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     
     await update.message.reply_text(
-        f"✅ **Title Submitted!**\n\n"
+        f"✅ **Title Submission Confirmed!**\n\n"
         f"🆔 Submission ID: `{submission_id}`\n"
-        f"🎬 Title: {suggested_title}\n"
-        f"👤 Creator: {creator_name or 'Unknown'}\n\n"
-        f"⏳ Your submission will be reviewed by an admin.\n"
-        f"Use /mystats to check your submission status.",
+        f"🎬 Suggested Title: {suggested_title}\n"
+        f"👤 Creator: {creator_name or 'Unknown'}\n"
+        f"🔗 Video: {video_url[:50]}...\n\n"
+        f"⏳ Your submission is now pending admin review.\n"
+        f"📊 Use /mystats to track your submission status.",
         parse_mode='Markdown'
     )
     
@@ -245,6 +274,13 @@ Welcome, worker! Your job is to help improve video titles in our content library
 3️⃣ Type your suggested title in the reply
 4️⃣ Wait for admin approval
 
+**How to Report Broken Videos:**
+
+🗑️ If a video link is broken or not found:
+1️⃣ Reply to the video message
+2️⃣ Type: `NOT FOUND`
+3️⃣ The video will be removed from the database
+
 **Good Title Examples:**
 ✅ "Hot Tub Stream - Bikini Try-On Haul"
 ✅ "Beach Photoshoot Behind The Scenes"
@@ -261,6 +297,7 @@ Welcome, worker! Your job is to help improve video titles in our content library
 • Include key details (location, activity, etc.)
 • Avoid clickbait or misleading titles
 • Use proper capitalization
+• Report broken videos with "NOT FOUND"
 
 **Commands:**
 • /mystats - View your submission statistics

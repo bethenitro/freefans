@@ -155,6 +155,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if permissions.is_worker(user_id):
         help_text += "\n\n👷 **Worker Commands:**\n\n"
         help_text += "• Reply to videos with titles to submit\n"
+        help_text += "• Reply with 'NOT FOUND' to remove broken videos\n"
         help_text += "• /mystats - View your submission stats\n"
         help_text += "• /workerhelp - Worker guide\n"
     

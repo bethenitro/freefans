@@ -109,6 +109,65 @@ def delete_creator(db: Session, name: str) -> bool:
         logger.error(f"✗ Failed to delete creator {name}: {e}")
         raise
 
+def delete_video_from_creator(db: Session, video_url: str) -> bool:
+    """
+    Delete a specific video from all creators' content.
+    Returns True if video was found and deleted, False otherwise.
+    """
+    try:
+        all_creators = get_all_creators(db)
+        video_deleted = False
+        
+        for creator in all_creators:
+            if not creator.content:
+                continue
+                
+            try:
+                content = json.loads(creator.content)
+                items = content.get('items', [])
+                original_count = len(items)
+                
+                # Filter out the video with matching URL
+                filtered_items = [
+                    item for item in items 
+                    if item.get('url') != video_url and item.get('original_url') != video_url
+                ]
+                
+                # If video was found and removed
+                if len(filtered_items) < original_count:
+                    content['items'] = filtered_items
+                    
+                    # Update the creator with new content
+                    if len(filtered_items) == 0:
+                        # If no items left, delete the creator
+                        logger.info(f"🗑️  Deleting creator {creator.name} - no content after video removal")
+                        db.delete(creator)
+                        video_deleted = True
+                    else:
+                        # Update creator with filtered content
+                        creator.content = json.dumps(content)
+                        creator.post_count = len(filtered_items)
+                        creator.updated_at = datetime.utcnow()
+                        logger.info(f"✓ Removed video from creator {creator.name} ({original_count} → {len(filtered_items)} items)")
+                        video_deleted = True
+                        
+            except json.JSONDecodeError:
+                logger.error(f"Invalid JSON content for creator {creator.name}")
+                continue
+        
+        if video_deleted:
+            db.commit()
+            logger.info(f"✓ Successfully deleted video: {video_url[:80]}...")
+            return True
+        else:
+            logger.info(f"⚠️  Video not found in any creator: {video_url[:80]}...")
+            return False
+            
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to delete video {video_url}: {e}")
+        raise
+
 def get_all_creators(db: Session) -> List[Creator]:
     """Get all creators ordered by last update."""
     return db.query(Creator).order_by(desc(Creator.updated_at)).all()
