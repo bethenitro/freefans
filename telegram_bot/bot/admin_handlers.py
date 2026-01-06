@@ -749,3 +749,138 @@ async def listworkers_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         message += "**Workers:** None\n"
     
     await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def deletions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View pending deletion requests (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text("❌ You don't have permission to use this command.")
+        return
+    
+    title_manager = get_title_manager()
+    pending = title_manager.get_pending_deletion_requests()
+    
+    if not pending:
+        await update.message.reply_text("📭 No pending deletion requests.")
+        return
+    
+    message = f"🗑️ **Pending Deletion Requests ({len(pending)}):**\n\n"
+    
+    for request in pending[:15]:  # Show first 15
+        message += f"🆔 {request['request_id']}\n"
+        message += f"👷 Worker: {request['worker_username']} (ID: {request['worker_id']})\n"
+        message += f"👤 Creator: {request['creator_name']}\n"
+        message += f"🎬 Video: {request['video_title']}\n"
+        message += f"🔗 URL: {request['video_url'][:50]}...\n"
+        message += f"📅 {request['timestamp'][:10]}\n"
+        message += "─" * 30 + "\n"
+    
+    if len(pending) > 15:
+        message += f"\n... and {len(pending) - 15} more\n"
+    
+    message += "\n💡 **Commands:**\n"
+    message += "• `/approvedelete <request_id>` - Approve deletion\n"
+    message += "• `/rejectdelete <request_id>` - Reject deletion\n"
+    
+    # Send in chunks if too long
+    if len(message) > 4000:
+        chunks = [message[i:i+4000] for i in range(0, len(message), 4000)]
+        for chunk in chunks:
+            await update.message.reply_text(chunk, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def approvedelete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Approve a deletion request and delete the video (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text("❌ You don't have permission to use this command.")
+        return
+    
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "❌ Usage: `/approvedelete <request_id>`\n\n"
+            "Example: `/approvedelete DR-20260106120000-123456789`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    request_id = context.args[0]
+    title_manager = get_title_manager()
+    cache_manager = get_cache_manager()
+    
+    # Approve the deletion request
+    request = title_manager.approve_deletion_request(request_id, user_id)
+    
+    if not request:
+        await update.message.reply_text(f"❌ Deletion request `{request_id}` not found.", parse_mode='Markdown')
+        return
+    
+    # Delete the video from database
+    video_url = request['video_url']
+    success = cache_manager.delete_video(video_url)
+    
+    if success:
+        await update.message.reply_text(
+            f"✅ **Deletion Request Approved!**\n\n"
+            f"🆔 Request: `{request_id}`\n"
+            f"🗑️ Video has been removed from database\n"
+            f"👤 Creator: {request['creator_name']}\n"
+            f"🎬 Video: {request['video_title']}\n"
+            f"🔗 URL: {video_url[:50]}...",
+            parse_mode='Markdown'
+        )
+        logger.info(f"Admin {user_id} approved deletion request {request_id} and deleted video")
+    else:
+        await update.message.reply_text(
+            f"⚠️ **Deletion Request Approved, but Video Not Found**\n\n"
+            f"🆔 Request: `{request_id}`\n"
+            f"The video may have already been removed.\n"
+            f"🔗 URL: {video_url[:50]}...",
+            parse_mode='Markdown'
+        )
+        logger.warning(f"Admin {user_id} approved deletion request {request_id} but video not found in database")
+
+
+async def rejectdelete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reject a deletion request (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text("❌ You don't have permission to use this command.")
+        return
+    
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "❌ Usage: `/rejectdelete <request_id>`\n\n"
+            "Example: `/rejectdelete DR-20260106120000-123456789`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    request_id = context.args[0]
+    title_manager = get_title_manager()
+    
+    # Reject the deletion request
+    request = title_manager.reject_deletion_request(request_id, user_id)
+    
+    if not request:
+        await update.message.reply_text(f"❌ Deletion request `{request_id}` not found.", parse_mode='Markdown')
+        return
+    
+    await update.message.reply_text(
+        f"❌ **Deletion Request Rejected**\n\n"
+        f"🆔 Request: `{request_id}`\n"
+        f"👤 Creator: {request['creator_name']}\n"
+        f"🎬 Video: {request['video_title']}\n"
+        f"The video will remain in the database.",
+        parse_mode='Markdown'
+    )
+    logger.info(f"Admin {user_id} rejected deletion request {request_id}")

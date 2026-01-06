@@ -26,6 +26,7 @@ class TitleManager:
         self.pending_file = os.path.join(submissions_dir, 'pending_titles.csv')
         self.approved_file = os.path.join(submissions_dir, 'approved_titles.csv')
         self.rejected_file = os.path.join(submissions_dir, 'rejected_titles.csv')
+        self.deletion_requests_file = os.path.join(submissions_dir, 'deletion_requests.csv')
         self.lock = threading.Lock()
         self._init_storage()
     
@@ -58,8 +59,17 @@ class TitleManager:
                 writer = csv.writer(f)
                 writer.writerow([
                     'submission_id', 'timestamp', 'worker_id', 'worker_username',
-                    'video_url', 'creator_name', 'suggested_title',
-                    'rejected_by', 'rejected_at', 'reason'
+                    'video_url', 'creator_name', 'suggested_title', 'status',
+                    'rejected_by', 'rejected_at'
+                ])
+        
+        # Initialize deletion requests CSV
+        if not os.path.exists(self.deletion_requests_file):
+            with open(self.deletion_requests_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'request_id', 'timestamp', 'worker_id', 'worker_username',
+                    'video_url', 'creator_name', 'video_title', 'status'
                 ])
     
     def submit_title(self, worker_id: int, worker_username: str, 
@@ -295,6 +305,123 @@ class TitleManager:
             stats['total'] = stats['pending'] + stats['approved'] + stats['rejected']
             
             return stats
+    
+    def submit_deletion_request(self, worker_id: int, worker_username: str,
+                               video_url: str, creator_name: str, video_title: str) -> str:
+        """
+        Submit a deletion request for a broken/not found video.
+        
+        Returns:
+            request_id: Unique ID for this deletion request
+        """
+        with self.lock:
+            timestamp = datetime.now()
+            request_id = f"DR-{timestamp.strftime('%Y%m%d%H%M%S')}-{worker_id}"
+            
+            with open(self.deletion_requests_file, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    request_id,
+                    timestamp.isoformat(),
+                    worker_id,
+                    worker_username or 'Unknown',
+                    video_url,
+                    creator_name,
+                    video_title or 'Unknown',
+                    'pending'
+                ])
+            
+            logger.info(f"Deletion request {request_id} from worker {worker_id}")
+            return request_id
+    
+    def get_pending_deletion_requests(self) -> List[Dict]:
+        """Get all pending deletion requests."""
+        pending = []
+        
+        if not os.path.exists(self.deletion_requests_file):
+            return pending
+        
+        with open(self.deletion_requests_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row['status'] == 'pending':
+                    pending.append(row)
+        
+        return pending
+    
+    def approve_deletion_request(self, request_id: str, admin_id: int) -> Optional[Dict]:
+        """
+        Approve a deletion request and mark it as approved.
+        
+        Returns:
+            The deletion request data if found, None otherwise
+        """
+        with self.lock:
+            # Read all requests
+            requests = []
+            request_data = None
+            
+            if not os.path.exists(self.deletion_requests_file):
+                return None
+            
+            with open(self.deletion_requests_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row['request_id'] == request_id and row['status'] == 'pending':
+                        row['status'] = 'approved'
+                        request_data = row.copy()
+                    requests.append(row)
+            
+            if request_data:
+                # Write back all requests
+                with open(self.deletion_requests_file, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=[
+                        'request_id', 'timestamp', 'worker_id', 'worker_username',
+                        'video_url', 'creator_name', 'video_title', 'status'
+                    ])
+                    writer.writeheader()
+                    writer.writerows(requests)
+                
+                logger.info(f"Approved deletion request {request_id} by admin {admin_id}")
+            
+            return request_data
+    
+    def reject_deletion_request(self, request_id: str, admin_id: int) -> Optional[Dict]:
+        """
+        Reject a deletion request.
+        
+        Returns:
+            The deletion request data if found, None otherwise
+        """
+        with self.lock:
+            # Read all requests
+            requests = []
+            request_data = None
+            
+            if not os.path.exists(self.deletion_requests_file):
+                return None
+            
+            with open(self.deletion_requests_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row['request_id'] == request_id and row['status'] == 'pending':
+                        row['status'] = 'rejected'
+                        request_data = row.copy()
+                    requests.append(row)
+            
+            if request_data:
+                # Write back all requests
+                with open(self.deletion_requests_file, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=[
+                        'request_id', 'timestamp', 'worker_id', 'worker_username',
+                        'video_url', 'creator_name', 'video_title', 'status'
+                    ])
+                    writer.writeheader()
+                    writer.writerows(requests)
+                
+                logger.info(f"Rejected deletion request {request_id} by admin {admin_id}")
+            
+            return request_data
 
 
 # Singleton instance

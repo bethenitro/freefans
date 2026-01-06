@@ -130,6 +130,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         help_text += "• /reject <id> - Reject a title\n"
         help_text += "• /bulkapprove <worker_id> - Bulk approve worker\n"
         help_text += "• /bulkreject <worker_id> - Bulk reject worker\n"
+        help_text += "• /deletions - View pending deletion requests\n"
+        help_text += "• /approvedelete <id> - Approve video deletion\n"
+        help_text += "• /rejectdelete <id> - Reject video deletion\n"
         help_text += "• /adminstats - View system statistics\n"
         help_text += "\n**Permission Hierarchy:**\n"
         help_text += "• Main Admin → Can manage sub-admins and workers\n"
@@ -149,6 +152,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         help_text += "• /reject <id> - Reject a title\n"
         help_text += "• /bulkapprove <worker_id> - Bulk approve worker\n"
         help_text += "• /bulkreject <worker_id> - Bulk reject worker\n"
+        help_text += "• /deletions - View pending deletion requests\n"
+        help_text += "• /approvedelete <id> - Approve video deletion\n"
+        help_text += "• /rejectdelete <id> - Reject video deletion\n"
         help_text += "• /adminstats - View system statistics\n"
     
     # Add worker commands if user is worker

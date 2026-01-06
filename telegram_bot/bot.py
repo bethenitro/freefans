@@ -21,7 +21,8 @@ from bot.admin_handlers import (
     reject_title_command, bulk_approve_command, bulk_reject_command, admin_stats_command,
     setupmainadmin_command, removemainadmin_command, confirmmainadminremoval_command,
     addadmin_command, removeadmin_command, addworker_command, removeworker_command,
-    listadmins_command, listworkers_command
+    listadmins_command, listworkers_command, deletions_command, approvedelete_command,
+    rejectdelete_command
 )
 from bot.worker_handlers import (
     handle_worker_reply, worker_stats_command, worker_help_command
@@ -258,6 +259,9 @@ def main():
     application.add_handler(CommandHandler("removeworker", removeworker_command))
     application.add_handler(CommandHandler("listadmins", listadmins_command))
     application.add_handler(CommandHandler("listworkers", listworkers_command))
+    application.add_handler(CommandHandler("deletions", deletions_command))
+    application.add_handler(CommandHandler("approvedelete", approvedelete_command))
+    application.add_handler(CommandHandler("rejectdelete", rejectdelete_command))
     application.add_handler(CommandHandler("requests", admin_requests_command))
     application.add_handler(CommandHandler("titles", admin_titles_command))
     application.add_handler(CommandHandler("approve", approve_title_command))

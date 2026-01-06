@@ -197,44 +197,30 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     if suggested_title.upper() == 'NOT FOUND':
         logger.info(f"Worker {user_id} reporting video as NOT FOUND")
         
-        cache_manager = _get_cache_manager()
+        # Submit deletion request for admin approval
+        title_manager = get_title_manager()
+        username = update.effective_user.username or update.effective_user.first_name
         
-        # Delete the video from database (now optimized and fast)
-        logger.info(f"Attempting to delete video: {video_url}")
-        try:
-            success = cache_manager.delete_video(video_url)
-            logger.info(f"Delete video result: {success}")
-        except Exception as e:
-            logger.error(f"Error deleting video: {e}", exc_info=True)
-            await update.message.reply_text(
-                f"❌ **Error Removing Video**\n\n"
-                f"An error occurred while trying to remove the video.\n"
-                f"Error: {str(e)}",
-                parse_mode='Markdown'
-            )
-            return True
+        request_id = title_manager.submit_deletion_request(
+            worker_id=user_id,
+            worker_username=username,
+            video_url=video_url,
+            creator_name=creator_name or 'Unknown',
+            video_title=video_title or 'Unknown'
+        )
         
-        if success:
-            logger.info(f"Successfully deleted video, sending confirmation")
-            await update.message.reply_text(
-                f"✅ **Video Removal Confirmed!**\n\n"
-                f"🗑️ The video has been successfully removed from the database.\n"
-                f"🔗 URL: {video_url[:50]}...\n\n"
-                f"Thank you for keeping the database clean! 🧹",
-                parse_mode='Markdown'
-            )
-            logger.info(f"Worker {user_id} marked video as NOT FOUND and deleted: {video_url[:80]}...")
-        else:
-            logger.info(f"Video not found in database, sending warning")
-            await update.message.reply_text(
-                f"⚠️ **Video Not Found in Database**\n\n"
-                f"The video may have already been removed or wasn't in the database.\n"
-                f"🔗 URL: {video_url[:50]}...",
-                parse_mode='Markdown'
-            )
-            logger.warning(f"Worker {user_id} tried to delete video but it wasn't found: {video_url[:80]}...")
+        await update.message.reply_text(
+            f"✅ **Deletion Request Submitted!**\n\n"
+            f"🆔 Request ID: `{request_id}`\n"
+            f"�️ Video: {video_title or 'Unknown'}\n"
+            f"👤 Creator: {creator_name or 'Unknown'}\n"
+            f"🔗 URL: {video_url[:50]}...\n\n"
+            f"⏳ Your deletion request is now pending admin review.\n"
+            f"The video will be removed after approval.",
+            parse_mode='Markdown'
+        )
         
-        logger.info(f"Completed NOT FOUND handling for worker {user_id}")
+        logger.info(f"Worker {user_id} submitted deletion request: {request_id}")
         return True
     
     if not suggested_title or len(suggested_title) < 3:
