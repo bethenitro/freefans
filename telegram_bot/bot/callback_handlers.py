@@ -1372,7 +1372,9 @@ Please try again later."""
             
             # Create message text with hidden links using Markdown
             if is_worker:
+                # For workers, include creator name in the message
                 message_text = f"""🎬 {title}
+👤 Creator: {creator_name}
 
 [👀 View Video]({landing_url})
 [🔗 Original Link]({original_url})

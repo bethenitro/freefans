@@ -7,9 +7,20 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from managers.permissions_manager import get_permissions_manager
 from managers.title_manager import get_title_manager
+from managers.cache_factory import get_cache_manager
 from core.user_session import UserSession
 
 logger = logging.getLogger(__name__)
+
+# Initialize cache manager once at module level
+_cache_manager = None
+
+def _get_cache_manager():
+    """Get or initialize cache manager singleton."""
+    global _cache_manager
+    if _cache_manager is None:
+        _cache_manager = get_cache_manager()
+    return _cache_manager
 
 
 async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_instance=None) -> bool:
@@ -75,6 +86,10 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
                 if '🎬' in line:
                     video_title = line.replace('🎬', '').strip()
                     break
+                # Extract creator name if present (for workers)
+                if '👤 Creator:' in line or 'Creator:' in line:
+                    creator_name = line.split('Creator:', 1)[1].strip()
+                    logger.info(f"Extracted creator from message: {creator_name}")
         
         # Try to find URLs in text as fallback
         if not video_url:
@@ -157,6 +172,21 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.debug(f"Message text: {replied_message.text[:100] if replied_message.text else 'No text'}")
         return False
     
+    # Try to get creator from session if not found yet
+    if not creator_name and bot_instance and user_id in bot_instance.user_sessions:
+        session = bot_instance.user_sessions[user_id]
+        if hasattr(session, 'current_creator') and session.current_creator:
+            creator_name = session.current_creator
+            logger.info(f"Got creator from session.current_creator: {creator_name}")
+        elif session.current_directory:
+            creator_name = session.current_directory.get('creator_name')
+            logger.info(f"Got creator from session.current_directory: {creator_name}")
+    
+    # Final fallback
+    if not creator_name:
+        creator_name = 'Unknown'
+        logger.warning(f"Could not determine creator name, using 'Unknown'")
+    
     logger.info(f"Worker {user_id} replying to video: {video_url[:80]}...")
     logger.info(f"Existing title: {video_title}, Creator: {creator_name}")
     
@@ -165,13 +195,26 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Check if worker is reporting video as NOT FOUND
     if suggested_title.upper() == 'NOT FOUND':
-        from managers.cache_factory import get_cache_manager
-        cache_manager = get_cache_manager()
+        logger.info(f"Worker {user_id} reporting video as NOT FOUND")
+        cache_manager = _get_cache_manager()
         
         # Delete the video from database
-        success = cache_manager.delete_video(video_url)
+        logger.info(f"Attempting to delete video: {video_url}")
+        try:
+            success = cache_manager.delete_video(video_url)
+            logger.info(f"Delete video result: {success}")
+        except Exception as e:
+            logger.error(f"Error deleting video: {e}", exc_info=True)
+            await update.message.reply_text(
+                f"❌ **Error Removing Video**\n\n"
+                f"An error occurred while trying to remove the video.\n"
+                f"Error: {str(e)}",
+                parse_mode='Markdown'
+            )
+            return True
         
         if success:
+            logger.info(f"Successfully deleted video, sending confirmation")
             await update.message.reply_text(
                 f"✅ **Video Removal Confirmed!**\n\n"
                 f"🗑️ The video has been successfully removed from the database.\n"
@@ -181,6 +224,7 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             logger.info(f"Worker {user_id} marked video as NOT FOUND and deleted: {video_url[:80]}...")
         else:
+            logger.info(f"Video not found in database, sending warning")
             await update.message.reply_text(
                 f"⚠️ **Video Not Found in Database**\n\n"
                 f"The video may have already been removed or wasn't in the database.\n"
