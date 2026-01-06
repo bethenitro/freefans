@@ -18,7 +18,10 @@ from bot.search_handler import handle_creator_search
 from bot.callback_handlers import handle_callback_query
 from bot.admin_handlers import (
     admin_requests_command, admin_titles_command, approve_title_command,
-    reject_title_command, bulk_approve_command, bulk_reject_command, admin_stats_command
+    reject_title_command, bulk_approve_command, bulk_reject_command, admin_stats_command,
+    setupmainadmin_command, removemainadmin_command, confirmmainadminremoval_command,
+    addadmin_command, removeadmin_command, addworker_command, removeworker_command,
+    listadmins_command, listworkers_command
 )
 from bot.worker_handlers import (
     handle_worker_reply, worker_stats_command, worker_help_command
@@ -100,6 +103,11 @@ class FreeFansBot:
 
     async def handle_creator_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle creator name input and search for content."""
+        # Check if this is admin setup password first
+        from bot.admin_handlers import handle_admin_setup_password
+        if await handle_admin_setup_password(update, context, self):
+            return
+        
         # Check if this is a worker reply to a video first
         if await handle_worker_reply(update, context, self):
             return
@@ -241,6 +249,15 @@ def main():
     application.add_handler(CommandHandler("cancel", lambda update, context: cancel_command(update, context, bot)))
     
     # Admin commands
+    application.add_handler(CommandHandler("setupmainadmin", lambda update, context: setupmainadmin_command(update, context, bot)))
+    application.add_handler(CommandHandler("removemainadmin", lambda update, context: removemainadmin_command(update, context, bot)))
+    application.add_handler(CommandHandler("confirmmainadminremoval", lambda update, context: confirmmainadminremoval_command(update, context, bot)))
+    application.add_handler(CommandHandler("addadmin", addadmin_command))
+    application.add_handler(CommandHandler("removeadmin", removeadmin_command))
+    application.add_handler(CommandHandler("addworker", addworker_command))
+    application.add_handler(CommandHandler("removeworker", removeworker_command))
+    application.add_handler(CommandHandler("listadmins", listadmins_command))
+    application.add_handler(CommandHandler("listworkers", listworkers_command))
     application.add_handler(CommandHandler("requests", admin_requests_command))
     application.add_handler(CommandHandler("titles", admin_titles_command))
     application.add_handler(CommandHandler("approve", approve_title_command))

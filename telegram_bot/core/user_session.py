@@ -36,6 +36,10 @@ class UserSession:
         self.awaiting_request = None  # 'creator' or 'content' or 'search'
         self.request_data = {}  # Store request details step by step
         
+        # Admin setup system
+        self.awaiting_admin_setup_password = False  # Flag for password entry
+        self.awaiting_admin_removal_confirmation = False  # Flag for removal confirmation
+        
         # Onlyfans Feed data
         self.of_feed_posts = None  # Store fetched Onlyfans Feed posts
         self.of_feed_username = None  # Store OF username

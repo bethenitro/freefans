@@ -110,9 +110,39 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     help_text = HELP_TEXT
     
-    # Add admin commands if user is admin
-    if permissions.is_admin(user_id):
-        help_text += "\n\n👑 **Admin Commands:**\n\n"
+    # Add main admin commands if user is main admin
+    if permissions.is_main_admin(user_id):
+        help_text += "\n\n👑 **Main Admin Commands:**\n\n"
+        help_text += "**Main Admin Management:**\n"
+        help_text += "• /removemainadmin - Remove yourself as main admin\n\n"
+        help_text += "**Sub-Admin Management:**\n"
+        help_text += "• /addadmin <user_id> - Add a sub-admin\n"
+        help_text += "• /removeadmin <user_id> - Remove a sub-admin\n"
+        help_text += "• /listadmins - List all admins\n\n"
+        help_text += "**Worker Management:**\n"
+        help_text += "• /addworker <user_id> - Add a worker\n"
+        help_text += "• /removeworker <user_id> - Remove a worker\n"
+        help_text += "• /listworkers - List all workers\n\n"
+        help_text += "**Content Management:**\n"
+        help_text += "• /requests - View pending user requests\n"
+        help_text += "• /titles - View pending title submissions\n"
+        help_text += "• /approve <id> - Approve a title\n"
+        help_text += "• /reject <id> - Reject a title\n"
+        help_text += "• /bulkapprove <worker_id> - Bulk approve worker\n"
+        help_text += "• /bulkreject <worker_id> - Bulk reject worker\n"
+        help_text += "• /adminstats - View system statistics\n"
+        help_text += "\n**Permission Hierarchy:**\n"
+        help_text += "• Main Admin → Can manage sub-admins and workers\n"
+        help_text += "• Sub-Admins → Can manage workers only\n"
+        help_text += "• Workers → Can submit title suggestions\n"
+    # Add sub-admin commands if user is admin (but not main admin)
+    elif permissions.is_admin(user_id):
+        help_text += "\n\n🔧 **Sub-Admin Commands:**\n\n"
+        help_text += "**Worker Management:**\n"
+        help_text += "• /addworker <user_id> - Add a worker\n"
+        help_text += "• /removeworker <user_id> - Remove a worker\n"
+        help_text += "• /listworkers - List all workers\n\n"
+        help_text += "**Content Management:**\n"
         help_text += "• /requests - View pending user requests\n"
         help_text += "• /titles - View pending title submissions\n"
         help_text += "• /approve <id> - Approve a title\n"
@@ -151,6 +181,8 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE, bot
         session.pending_creator_name = None
         session.awaiting_request = None
         session.request_data = {}
+        session.awaiting_admin_setup_password = False
+        session.awaiting_admin_removal_confirmation = False
     
     reply_markup = create_main_menu_keyboard()
     await update.message.reply_text(

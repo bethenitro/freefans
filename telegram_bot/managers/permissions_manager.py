@@ -40,6 +40,7 @@ class PermissionsManager:
     def _init_default_config(self):
         """Initialize default configuration."""
         self.config = {
+            'main_admin': None,
             'admins': [],
             'workers': [],
             'settings': {
@@ -57,9 +58,17 @@ class PermissionsManager:
             logger.error(f"Error saving permissions config: {e}")
     
     def is_admin(self, user_id: int) -> bool:
-        """Check if user is an admin."""
+        """Check if user is an admin (includes main admin)."""
         with self.lock:
+            # Main admin is also an admin
+            if user_id == self.config.get('main_admin'):
+                return True
             return user_id in self.config.get('admins', [])
+    
+    def is_main_admin(self, user_id: int) -> bool:
+        """Check if user is the main admin."""
+        with self.lock:
+            return user_id == self.config.get('main_admin')
     
     def is_worker(self, user_id: int) -> bool:
         """Check if user is a worker."""
@@ -120,9 +129,42 @@ class PermissionsManager:
         """Get all permissions data."""
         with self.lock:
             return {
+                'main_admin': self.config.get('main_admin'),
                 'admins': self.config.get('admins', []).copy(),
                 'workers': self.config.get('workers', []).copy()
             }
+    
+    def has_main_admin(self) -> bool:
+        """Check if a main admin is configured."""
+        with self.lock:
+            return self.config.get('main_admin') is not None
+    
+    def set_main_admin(self, user_id: int) -> bool:
+        """Set a user as the main admin. Returns True if successful."""
+        with self.lock:
+            if self.config.get('main_admin') is not None:
+                logger.warning(f"Attempted to set main admin when one already exists")
+                return False
+            self.config['main_admin'] = user_id
+            self._save_config()
+            logger.info(f"Set main admin: {user_id}")
+            return True
+    
+    def remove_main_admin(self) -> bool:
+        """Remove the current main admin. Returns True if successful."""
+        with self.lock:
+            if self.config.get('main_admin') is None:
+                return False
+            old_admin = self.config['main_admin']
+            self.config['main_admin'] = None
+            self._save_config()
+            logger.info(f"Removed main admin: {old_admin}")
+            return True
+    
+    def get_main_admin(self) -> Optional[int]:
+        """Get the main admin user ID."""
+        with self.lock:
+            return self.config.get('main_admin')
 
 
 # Singleton instance

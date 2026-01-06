@@ -345,3 +345,407 @@ async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             message += f"Rejected: {stats['rejected']}\n"
     
     await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def setupmainadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_instance):
+    """Setup the main admin - first time only, password protected."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    # Check if main admin already exists
+    if permissions.has_main_admin():
+        await update.message.reply_text(
+            "❌ Main admin already configured. Only the current main admin can remove themselves."
+        )
+        return
+    
+    # Initialize user session if needed
+    if user_id not in bot_instance.user_sessions:
+        from core.user_session import UserSession
+        bot_instance.user_sessions[user_id] = UserSession(user_id)
+    
+    # Set flag to await password
+    session = bot_instance.user_sessions[user_id]
+    session.awaiting_admin_setup_password = True
+    
+    await update.message.reply_text(
+        "🔐 To become the main admin, please enter the setup password:\n\n"
+        "⚠️ Warning: Send the password as a regular message (not a command)."
+    )
+    logger.info(f"User {user_id} initiated main admin setup")
+
+
+async def removemainadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_instance):
+    """Remove yourself as main admin - confirmation required."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    # Check if user is the current main admin
+    if not permissions.is_main_admin(user_id):
+        await update.message.reply_text(
+            "❌ Only the main admin can remove themselves."
+        )
+        return
+    
+    # Initialize user session if needed
+    if user_id not in bot_instance.user_sessions:
+        from core.user_session import UserSession
+        bot_instance.user_sessions[user_id] = UserSession(user_id)
+    
+    # Set flag to await confirmation
+    session = bot_instance.user_sessions[user_id]
+    session.awaiting_admin_removal_confirmation = True
+    
+    await update.message.reply_text(
+        "⚠️ **Are you sure you want to remove yourself as main admin?**\n\n"
+        "This will allow someone else to become main admin using /setupmainadmin\n\n"
+        "Send `/confirmmainadminremoval` to confirm, or /cancel to abort.",
+        parse_mode='Markdown'
+    )
+    logger.info(f"Main admin {user_id} requested removal confirmation")
+
+
+async def confirmmainadminremoval_command(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_instance):
+    """Confirm removal of main admin status."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    # Initialize user session if needed
+    if user_id not in bot_instance.user_sessions:
+        await update.message.reply_text(
+            "❌ No removal request in progress. Use /removemainadmin first."
+        )
+        return
+    
+    session = bot_instance.user_sessions[user_id]
+    
+    # Check if confirmation was requested
+    if not session.awaiting_admin_removal_confirmation:
+        await update.message.reply_text(
+            "❌ No removal request in progress. Use /removemainadmin first."
+        )
+        return
+    
+    # Check if user is still the main admin
+    if not permissions.is_main_admin(user_id):
+        session.awaiting_admin_removal_confirmation = False
+        await update.message.reply_text(
+            "❌ You are not the main admin."
+        )
+        return
+    
+    # Remove main admin
+    session.awaiting_admin_removal_confirmation = False
+    success = permissions.remove_main_admin()
+    
+    if success:
+        await update.message.reply_text(
+            "✅ You have been removed as main admin.\n\n"
+            "Someone else can now set up as main admin using /setupmainadmin"
+        )
+        logger.info(f"Main admin {user_id} removed themselves")
+    else:
+        await update.message.reply_text(
+            "❌ Failed to remove main admin. Please try again."
+        )
+        logger.error(f"Failed to remove main admin {user_id}")
+
+
+async def handle_admin_setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_instance) -> bool:
+    """
+    Handle password verification for main admin setup.
+    Returns True if message was handled, False otherwise.
+    """
+    from decouple import config
+    
+    user_id = update.effective_user.id
+    
+    # Check if user has an active session awaiting password
+    if user_id not in bot_instance.user_sessions:
+        return False
+    
+    session = bot_instance.user_sessions[user_id]
+    
+    if not session.awaiting_admin_setup_password:
+        return False
+    
+    # Clear the flag immediately
+    session.awaiting_admin_setup_password = False
+    
+    # Get the password from message
+    provided_password = update.message.text.strip()
+    
+    # Get correct password from .env
+    try:
+        correct_password = config('ADMIN_SETUP_PASSWORD')
+    except Exception as e:
+        logger.error(f"Failed to get ADMIN_SETUP_PASSWORD from .env: {e}")
+        await update.message.reply_text(
+            "❌ Server configuration error. Please contact the developer."
+        )
+        return True
+    
+    # Verify password
+    if provided_password == correct_password:
+        permissions = get_permissions_manager()
+        success = permissions.set_main_admin(user_id)
+        
+        if success:
+            await update.message.reply_text(
+                "🎉 **Congratulations!** You are now the main admin!\n\n"
+                "As the main admin, you can:\n"
+                "• Add and remove sub-admins\n"
+                "• Add and remove workers\n"
+                "• Use all admin commands\n\n"
+                "Use /help to see available commands.",
+                parse_mode='Markdown'
+            )
+            logger.info(f"User {user_id} successfully became main admin")
+        else:
+            await update.message.reply_text(
+                "❌ Setup failed. Main admin may have been set by someone else."
+            )
+            logger.error(f"Failed to set user {user_id} as main admin")
+    else:
+        await update.message.reply_text(
+            "❌ Incorrect password. Setup cancelled.\n\n"
+            "If you need to try again, use /setupmainadmin"
+        )
+        logger.warning(f"User {user_id} provided incorrect admin setup password")
+    
+    return True
+
+
+async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a sub-admin (main admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    # Only main admin can add sub-admins
+    if not permissions.is_main_admin(user_id):
+        await update.message.reply_text(
+            "❌ Only the main admin can add sub-admins."
+        )
+        return
+    
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "❌ Usage: `/addadmin <user_id>`\n\n"
+            "Example: `/addadmin 123456789`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID. Must be a number.")
+        return
+    
+    # Cannot add main admin as sub-admin
+    if permissions.is_main_admin(target_user_id):
+        await update.message.reply_text("❌ This user is the main admin.")
+        return
+    
+    success = permissions.add_admin(target_user_id)
+    
+    if success:
+        await update.message.reply_text(
+            f"✅ User `{target_user_id}` has been added as a sub-admin.\n\n"
+            f"They can now manage workers and use admin commands.",
+            parse_mode='Markdown'
+        )
+        logger.info(f"Main admin {user_id} added sub-admin {target_user_id}")
+    else:
+        await update.message.reply_text(
+            f"⚠️ User `{target_user_id}` is already a sub-admin.",
+            parse_mode='Markdown'
+        )
+
+
+async def removeadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a sub-admin (main admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    # Only main admin can remove sub-admins
+    if not permissions.is_main_admin(user_id):
+        await update.message.reply_text(
+            "❌ Only the main admin can remove sub-admins."
+        )
+        return
+    
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "❌ Usage: `/removeadmin <user_id>`\n\n"
+            "Example: `/removeadmin 123456789`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID. Must be a number.")
+        return
+    
+    # Cannot remove main admin this way
+    if permissions.is_main_admin(target_user_id):
+        await update.message.reply_text(
+            "❌ Cannot remove main admin this way. Main admin must use /removemainadmin"
+        )
+        return
+    
+    success = permissions.remove_admin(target_user_id)
+    
+    if success:
+        await update.message.reply_text(
+            f"✅ User `{target_user_id}` has been removed as a sub-admin.",
+            parse_mode='Markdown'
+        )
+        logger.info(f"Main admin {user_id} removed sub-admin {target_user_id}")
+    else:
+        await update.message.reply_text(
+            f"⚠️ User `{target_user_id}` is not a sub-admin.",
+            parse_mode='Markdown'
+        )
+
+
+async def addworker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a worker (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    # Any admin can add workers
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text(
+            "❌ Only admins can add workers."
+        )
+        return
+    
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "❌ Usage: `/addworker <user_id>`\n\n"
+            "Example: `/addworker 123456789`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID. Must be a number.")
+        return
+    
+    success = permissions.add_worker(target_user_id)
+    
+    if success:
+        await update.message.reply_text(
+            f"✅ User `{target_user_id}` has been added as a worker.\n\n"
+            f"They can now submit title suggestions.",
+            parse_mode='Markdown'
+        )
+        logger.info(f"Admin {user_id} added worker {target_user_id}")
+    else:
+        await update.message.reply_text(
+            f"⚠️ User `{target_user_id}` is already a worker.",
+            parse_mode='Markdown'
+        )
+
+
+async def removeworker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a worker (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    # Any admin can remove workers
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text(
+            "❌ Only admins can remove workers."
+        )
+        return
+    
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "❌ Usage: `/removeworker <user_id>`\n\n"
+            "Example: `/removeworker 123456789`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID. Must be a number.")
+        return
+    
+    success = permissions.remove_worker(target_user_id)
+    
+    if success:
+        await update.message.reply_text(
+            f"✅ User `{target_user_id}` has been removed as a worker.",
+            parse_mode='Markdown'
+        )
+        logger.info(f"Admin {user_id} removed worker {target_user_id}")
+    else:
+        await update.message.reply_text(
+            f"⚠️ User `{target_user_id}` is not a worker.",
+            parse_mode='Markdown'
+        )
+
+
+async def listadmins_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all admins (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text(
+            "❌ Only admins can view the admin list."
+        )
+        return
+    
+    main_admin = permissions.get_main_admin()
+    admins = permissions.get_admins()
+    
+    message = "👑 **Admin List**\n\n"
+    
+    if main_admin:
+        message += f"**Main Admin:** `{main_admin}`\n\n"
+    else:
+        message += "**Main Admin:** None (use /setupmainadmin)\n\n"
+    
+    if admins:
+        message += f"**Sub-Admins ({len(admins)}):**\n"
+        for admin_id in admins:
+            if admin_id != main_admin:  # Don't list main admin twice
+                message += f"• `{admin_id}`\n"
+    else:
+        message += "**Sub-Admins:** None\n"
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def listworkers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all workers (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text(
+            "❌ Only admins can view the worker list."
+        )
+        return
+    
+    workers = permissions.get_workers()
+    
+    message = "👷 **Worker List**\n\n"
+    
+    if workers:
+        message += f"**Workers ({len(workers)}):**\n"
+        for worker_id in workers:
+            message += f"• `{worker_id}`\n"
+    else:
+        message += "**Workers:** None\n"
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
