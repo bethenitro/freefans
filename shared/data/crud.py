@@ -112,13 +112,30 @@ def delete_creator(db: Session, name: str) -> bool:
 def delete_video_from_creator(db: Session, video_url: str) -> bool:
     """
     Delete a specific video from all creators' content.
+    Optimized to search only creators whose content contains the URL.
     Returns True if video was found and deleted, False otherwise.
     """
     try:
-        all_creators = get_all_creators(db)
+        # Use SQL LIKE query to find only creators that might contain this URL
+        # This is much faster than loading all creators
+        from sqlalchemy import or_
+        
+        creators_with_video = db.query(Creator).filter(
+            or_(
+                Creator.content.like(f'%{video_url}%'),
+                Creator.content.like(f'%{video_url.replace("https://", "http://")}%')
+            )
+        ).all()
+        
+        if not creators_with_video:
+            logger.info(f"⚠️  Video not found in any creator (quick search): {video_url[:80]}...")
+            return False
+        
+        logger.info(f"Found {len(creators_with_video)} creators that might contain the video")
+        
         video_deleted = False
         
-        for creator in all_creators:
+        for creator in creators_with_video:
             if not creator.content:
                 continue
                 
@@ -160,7 +177,7 @@ def delete_video_from_creator(db: Session, video_url: str) -> bool:
             logger.info(f"✓ Successfully deleted video: {video_url[:80]}...")
             return True
         else:
-            logger.info(f"⚠️  Video not found in any creator: {video_url[:80]}...")
+            logger.info(f"⚠️  Video not found in searched creators: {video_url[:80]}...")
             return False
             
     except Exception as e:

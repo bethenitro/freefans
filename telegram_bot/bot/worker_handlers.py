@@ -196,9 +196,10 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Check if worker is reporting video as NOT FOUND
     if suggested_title.upper() == 'NOT FOUND':
         logger.info(f"Worker {user_id} reporting video as NOT FOUND")
+        
         cache_manager = _get_cache_manager()
         
-        # Delete the video from database
+        # Delete the video from database (now optimized and fast)
         logger.info(f"Attempting to delete video: {video_url}")
         try:
             success = cache_manager.delete_video(video_url)
@@ -233,6 +234,7 @@ async def handle_worker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             logger.warning(f"Worker {user_id} tried to delete video but it wasn't found: {video_url[:80]}...")
         
+        logger.info(f"Completed NOT FOUND handling for worker {user_id}")
         return True
     
     if not suggested_title or len(suggested_title) < 3:
