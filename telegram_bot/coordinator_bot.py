@@ -23,7 +23,7 @@ from coordinator.session_manager import SessionManager
 from coordinator.response_formatter import ResponseFormatter
 
 # Import workers
-from workers.distributed_registry import get_distributed_registry
+from workers.celery_registry import get_celery_registry
 from workers.base_worker import Task
 from workers.search_worker.tasks import SearchTask
 from workers.content_worker.tasks import LoadContentTask, LoadMorePagesTask
@@ -59,16 +59,14 @@ class CoordinatorBot:
         self.session_manager = SessionManager()
         self.formatter = ResponseFormatter()
         
-        # Use distributed worker registry
-        redis_url = config('REDIS_URL', default='redis://localhost:6379')
-        self.worker_registry = get_distributed_registry(redis_url)
+        # Use Celery worker registry
+        self.worker_registry = get_celery_registry()
         
         # Initialize content manager and cache
         self.cache_manager = get_cache_manager()
         self.content_manager = ContentManager(self.cache_manager)
         
-        logger.info("✅ Coordinator Bot initialized (distributed mode)")
-        logger.info(f"✅ Redis URL: {redis_url}")
+        logger.info("✅ Coordinator Bot initialized (Celery + RabbitMQ mode)")
     
     # ==================== COMMAND HANDLERS ====================
     
@@ -1672,8 +1670,8 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_message))
     application.add_error_handler(bot.error_handler)
     
-    print("✅ Coordinator Bot ready (distributed mode)!")
-    print(f"✅ Connected to Redis for task distribution")
+    print("✅ Coordinator Bot ready (Celery + RabbitMQ mode)!")
+    print(f"✅ Connected to RabbitMQ for task distribution")
     print("🚀 Starting bot polling...\n")
     
     try:
