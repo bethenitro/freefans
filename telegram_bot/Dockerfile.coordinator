@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y \
 # Copy telegram_bot directory
 COPY telegram_bot/ /app/
 
+# Copy shared directory from root (needed for imports)
+COPY shared/ /app/shared/
+
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
