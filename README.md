@@ -8,6 +8,7 @@ FreeFans is a Telegram bot for accessing creator content with a separate landing
 
 ## Project Structure
 
+
 ```
 FreeFans/
 ├── telegram_bot/          # Telegram bot application
