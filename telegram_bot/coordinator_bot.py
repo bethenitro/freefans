@@ -1590,7 +1590,33 @@ Welcome, worker! Your job is to help improve video titles in our content library
     
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         """Handle errors."""
-        logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
+        from telegram.error import Forbidden, BadRequest, TimedOut, NetworkError
+        
+        error = context.error
+        
+        # Handle specific error types gracefully
+        if isinstance(error, Forbidden):
+            # User blocked the bot or deactivated account - this is normal
+            if "user is deactivated" in str(error):
+                logger.warning(f"User deactivated their account - skipping update")
+            elif "bot was blocked by the user" in str(error):
+                logger.warning(f"User blocked the bot - skipping update")
+            else:
+                logger.error(f"Forbidden error: {error}")
+            return
+        
+        elif isinstance(error, BadRequest):
+            # Bad request - log but don't crash
+            logger.warning(f"Bad request: {error}")
+            return
+        
+        elif isinstance(error, (TimedOut, NetworkError)):
+            # Network issues - log but don't crash
+            logger.warning(f"Network error: {error}")
+            return
+        
+        # For other errors, log with full traceback
+        logger.error(f"Exception while handling an update: {error}", exc_info=error)
         
         error_message = "❌ An unexpected error occurred. Please try again later."
         

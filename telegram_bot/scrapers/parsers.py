@@ -195,8 +195,21 @@ def is_valid_content_image(image_url: str, min_size_indicator: int = 300) -> boo
 def load_video_domains(file_path: str = None) -> List[str]:
     """Load video hosting domains from configuration file."""
     if file_path is None:
-        base_dir = Path(__file__).parent.parent.parent
-        file_path = str(base_dir / 'shared' / 'config' / 'video_domains.txt')
+        # Try multiple possible locations
+        possible_paths = [
+            Path(__file__).parent.parent / 'shared' / 'config' / 'video_domains.txt',  # /app/shared/config/
+            Path(__file__).parent.parent.parent / 'shared' / 'config' / 'video_domains.txt',  # Legacy path
+            Path('/app/shared/config/video_domains.txt'),  # Absolute path in Docker
+        ]
+        file_path = None
+        for path in possible_paths:
+            if path.exists():
+                file_path = str(path)
+                break
+        
+        if file_path is None:
+            file_path = str(possible_paths[0])  # Use first path for error message
+    
     domains = []
     try:
         if os.path.exists(file_path):
@@ -222,8 +235,21 @@ def load_video_domains(file_path: str = None) -> List[str]:
 def load_content_domains(file_path: str = None) -> List[str]:
     """Load content hosting domains from configuration file."""
     if file_path is None:
-        base_dir = Path(__file__).parent.parent.parent
-        file_path = str(base_dir / 'shared' / 'config' / 'content_domains.txt')
+        # Try multiple possible locations
+        possible_paths = [
+            Path(__file__).parent.parent / 'shared' / 'config' / 'content_domains.txt',  # /app/shared/config/
+            Path(__file__).parent.parent.parent / 'shared' / 'config' / 'content_domains.txt',  # Legacy path
+            Path('/app/shared/config/content_domains.txt'),  # Absolute path in Docker
+        ]
+        file_path = None
+        for path in possible_paths:
+            if path.exists():
+                file_path = str(path)
+                break
+        
+        if file_path is None:
+            file_path = str(possible_paths[0])  # Use first path for error message
+    
     domains = []
     try:
         if os.path.exists(file_path):
