@@ -1,5 +1,7 @@
 # Dockerfile for Worker Bot (Business Logic)
 # This bot handles all business logic processing
+#
+# For Railway deployment - builds from root directory
 
 FROM python:3.11-slim
 
@@ -10,12 +12,11 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy telegram_bot directory
+COPY telegram_bot/ /app/
 
-# Copy application code
-COPY . .
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Create necessary directories
 RUN mkdir -p shared/config shared/data
