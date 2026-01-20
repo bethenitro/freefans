@@ -8,9 +8,16 @@ from typing import Dict, List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from managers.pool_manager import get_pool_manager
-from managers.payment_manager import get_payment_manager
-from managers.permissions_manager import get_permissions_manager
+try:
+    # When running from project root (coordinator bot)
+    from telegram_bot.managers.pool_manager import get_pool_manager
+    from telegram_bot.managers.payment_manager import get_payment_manager
+    from telegram_bot.managers.permissions_manager import get_permissions_manager
+except ImportError:
+    # When running from telegram_bot directory
+    from managers.pool_manager import get_pool_manager
+    from managers.payment_manager import get_payment_manager
+    from managers.permissions_manager import get_permissions_manager
 
 logger = logging.getLogger(__name__)
 

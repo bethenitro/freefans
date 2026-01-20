@@ -6,7 +6,12 @@ Handles user state without business logic.
 
 from typing import Dict, Optional
 import logging
-from core.user_session import UserSession
+try:
+    # When running from project root
+    from telegram_bot.core.user_session import UserSession
+except ImportError:
+    # When running from telegram_bot directory
+    from core.user_session import UserSession
 
 logger = logging.getLogger(__name__)
 

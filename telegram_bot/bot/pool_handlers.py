@@ -9,9 +9,16 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Labeled
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest
 
-from managers.pool_manager import get_pool_manager
-from managers.payment_manager import get_payment_manager
-from bot.utilities import send_message_with_retry
+try:
+    # When running from project root (coordinator bot)
+    from telegram_bot.managers.pool_manager import get_pool_manager
+    from telegram_bot.managers.payment_manager import get_payment_manager
+    from telegram_bot.bot.utilities import send_message_with_retry
+except ImportError:
+    # When running from telegram_bot directory
+    from managers.pool_manager import get_pool_manager
+    from managers.payment_manager import get_payment_manager
+    from bot.utilities import send_message_with_retry
 
 logger = logging.getLogger(__name__)
 

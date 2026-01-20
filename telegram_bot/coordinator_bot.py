@@ -19,32 +19,70 @@ from telegram.error import TimedOut, NetworkError, BadRequest
 from decouple import config
 
 # Import coordinator components
-from coordinator.session_manager import SessionManager
-from coordinator.response_formatter import ResponseFormatter
+try:
+    # When running from project root
+    from telegram_bot.coordinator.session_manager import SessionManager
+    from telegram_bot.coordinator.response_formatter import ResponseFormatter
+except ImportError:
+    # When running from telegram_bot directory
+    from coordinator.session_manager import SessionManager
+    from coordinator.response_formatter import ResponseFormatter
 
 # Import workers
-from workers.celery_registry import get_celery_registry
-from workers.base_worker import Task
-from workers.search_worker.tasks import SearchTask
-from workers.content_worker.tasks import LoadContentTask, LoadMorePagesTask
+try:
+    # When running from project root
+    from telegram_bot.workers.celery_registry import get_celery_registry
+    from telegram_bot.workers.base_worker import Task
+    from telegram_bot.workers.search_worker.tasks import SearchTask
+    from telegram_bot.workers.content_worker.tasks import LoadContentTask, LoadMorePagesTask
+except ImportError:
+    # When running from telegram_bot directory
+    from workers.celery_registry import get_celery_registry
+    from workers.base_worker import Task
+    from workers.search_worker.tasks import SearchTask
+    from workers.content_worker.tasks import LoadContentTask, LoadMorePagesTask
 
 # Import existing components
-from core.content_manager import ContentManager
-from managers.cache_factory import get_cache_manager
-from managers.permissions_manager import get_permissions_manager
-from managers.request_manager import get_request_manager
-from managers.title_manager import get_title_manager
+try:
+    # When running from project root
+    from telegram_bot.core.content_manager import ContentManager
+    from telegram_bot.managers.cache_factory import get_cache_manager
+    from telegram_bot.managers.permissions_manager import get_permissions_manager
+    from telegram_bot.managers.request_manager import get_request_manager
+    from telegram_bot.managers.title_manager import get_title_manager
+except ImportError:
+    # When running from telegram_bot directory
+    from core.content_manager import ContentManager
+    from managers.cache_factory import get_cache_manager
+    from managers.permissions_manager import get_permissions_manager
+    from managers.request_manager import get_request_manager
+    from managers.title_manager import get_title_manager
 
 # Import pool components
-from bot.pool_handlers import get_pool_handlers
-from bot.admin_pool_handlers import get_admin_pool_handlers
+try:
+    # When running from project root
+    from telegram_bot.bot.pool_handlers import get_pool_handlers
+    from telegram_bot.bot.admin_pool_handlers import get_admin_pool_handlers
+except ImportError:
+    # When running from telegram_bot directory
+    from bot.pool_handlers import get_pool_handlers
+    from bot.admin_pool_handlers import get_admin_pool_handlers
 
 # Import UI components
-from bot.ui_components import (
-    format_directory_text, create_content_directory_keyboard,
-    create_picture_navigation_keyboard, create_video_navigation_keyboard
-)
-from bot.utilities import send_message_with_retry
+try:
+    # When running from project root
+    from telegram_bot.bot.ui_components import (
+        format_directory_text, create_content_directory_keyboard,
+        create_picture_navigation_keyboard, create_video_navigation_keyboard
+    )
+    from telegram_bot.bot.utilities import send_message_with_retry
+except ImportError:
+    # When running from telegram_bot directory
+    from bot.ui_components import (
+        format_directory_text, create_content_directory_keyboard,
+        create_picture_navigation_keyboard, create_video_navigation_keyboard
+    )
+    from bot.utilities import send_message_with_retry
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
