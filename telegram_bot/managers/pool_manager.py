@@ -75,7 +75,8 @@ class PoolManager:
             pool_id = f"POOL-{timestamp}-{str(uuid.uuid4())[:8].upper()}"
             
             # Calculate expiration
-            expires_at = datetime.now() + timedelta(days=duration)
+            from datetime import timezone
+            expires_at = datetime.now(timezone.utc) + timedelta(days=duration)
             
             db = get_db_session_sync()
             try:
@@ -223,7 +224,9 @@ class PoolManager:
                     return False, f"Pool is {pool.status} and cannot accept contributions", 0
                 
                 # Check if pool expired
-                if datetime.now() > pool.expires_at:
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
+                if now > pool.expires_at:
                     pool.status = 'expired'
                     db.commit()
                     return False, "Pool has expired", 0
@@ -286,7 +289,8 @@ class PoolManager:
                 # Check if pool is completed
                 if pool.current_amount >= pool.total_cost:
                     pool.status = 'completed'
-                    pool.completed_at = datetime.now()
+                    from datetime import timezone
+                    pool.completed_at = datetime.now(timezone.utc)
                 
                 # Update user profile
                 user_profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
@@ -351,10 +355,14 @@ class PoolManager:
         try:
             db = get_db_session_sync()
             try:
+                # Use timezone-aware datetime
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
+                
                 query = db.query(ContentPool).filter(
                     and_(
                         ContentPool.status == 'active',
-                        ContentPool.expires_at > datetime.now()
+                        ContentPool.expires_at > now
                     )
                 )
                 
@@ -365,16 +373,19 @@ class PoolManager:
                 
                 result = []
                 for pool in pools:
-                    completion_percentage = (pool.current_amount / pool.target_amount * 100) if pool.target_amount > 0 else 0
+                    completion_percentage = (pool.current_amount / pool.total_cost * 100) if pool.total_cost > 0 else 0
                     result.append({
                         'pool_id': pool.pool_id,
                         'creator_name': pool.creator_name,
                         'content_title': pool.content_title,
                         'content_type': pool.content_type,
-                        'target_amount': pool.target_amount,
+                        'total_cost': pool.total_cost,
                         'current_amount': pool.current_amount,
                         'contributors_count': pool.contributors_count,
+                        'max_contributors': pool.max_contributors,
+                        'current_price_per_user': pool.current_price_per_user,
                         'completion_percentage': completion_percentage,
+                        'status': pool.status,
                         'expires_at': pool.expires_at,
                         'created_at': pool.created_at
                     })
@@ -531,7 +542,7 @@ class PoolManager:
                         'creator_name': pool.creator_name,
                         'content_title': pool.content_title,
                         'pool_status': pool.status,
-                        'pool_completion': (pool.current_amount / pool.target_amount * 100) if pool.target_amount > 0 else 0
+                        'pool_completion': (pool.current_amount / pool.total_cost * 100) if pool.total_cost > 0 else 0
                     })
                 
                 return result
@@ -563,7 +574,8 @@ class PoolManager:
                     return False
                 
                 pool.status = 'completed'
-                pool.completed_at = datetime.now()
+                from datetime import timezone
+                pool.completed_at = datetime.now(timezone.utc)
                 pool.content_url = content_url
                 if landing_page_id:
                     pool.landing_page_id = landing_page_id
@@ -650,10 +662,12 @@ class PoolManager:
             db = get_db_session_sync()
             try:
                 # Find expired active pools
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
                 expired_pools = db.query(ContentPool).filter(
                     and_(
                         ContentPool.status == 'active',
-                        ContentPool.expires_at < datetime.now()
+                        ContentPool.expires_at < now
                     )
                 ).all()
                 

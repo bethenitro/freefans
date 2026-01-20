@@ -30,6 +30,14 @@ from bot.worker_handlers import (
 # Import pool handlers
 from bot.pool_handlers import get_pool_handlers
 from bot.admin_pool_handlers import get_admin_pool_handlers
+# Import channel handlers
+from bot.channel_handlers import (
+    add_required_channel_command, remove_required_channel_command,
+    list_required_channels_command, channel_settings_command,
+    handle_channel_callback, set_welcome_message_command,
+    set_membership_message_command
+)
+from bot.channel_middleware import require_channel_membership, handle_check_membership_callback
 from managers.cache_factory import get_cache_manager
 from core.content_scraper import SimpleCityScraper
 
@@ -62,6 +70,7 @@ class FreeFansBot:
         self.admin_pool_handlers = get_admin_pool_handlers()
 
     
+    @require_channel_membership
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send a message when the command /start is issued."""
         await start_command(update, context, self)
@@ -109,6 +118,7 @@ class FreeFansBot:
             logger.error(f"Error showing cache stats: {e}")
             await update.message.reply_text("❌ Failed to retrieve cache statistics.")
 
+    @require_channel_membership
     async def handle_creator_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle creator name input and search for content."""
         # Check if this is admin setup password first
@@ -175,6 +185,14 @@ class FreeFansBot:
         elif (data == "admin_pool_stats" or data == "admin_view_pools" or 
               data == "admin_cleanup_pools"):
             await self.admin_pool_handlers.handle_admin_callback(update, context)
+        # Route channel management callbacks
+        elif (data == "check_membership" or data == "view_required_channels" or 
+              data == "channel_settings" or data.startswith("toggle_admin_bypass_") or
+              data.startswith("toggle_worker_bypass_") or data == "edit_channel_messages"):
+            if data == "check_membership":
+                await handle_check_membership_callback(update, context)
+            else:
+                await handle_channel_callback(update, context)
         else:
             # Route to existing callback handler
             await handle_callback_query(update, context, self)
@@ -333,6 +351,14 @@ def main():
     # Worker commands
     application.add_handler(CommandHandler("mystats", worker_stats_command))
     application.add_handler(CommandHandler("workerhelp", worker_help_command))
+    
+    # Channel management commands (admin only)
+    application.add_handler(CommandHandler("addrequiredchannel", add_required_channel_command))
+    application.add_handler(CommandHandler("removerequiredchannel", remove_required_channel_command))
+    application.add_handler(CommandHandler("listrequiredchannels", list_required_channels_command))
+    application.add_handler(CommandHandler("channelsettings", channel_settings_command))
+    application.add_handler(CommandHandler("setwelcomemessage", set_welcome_message_command))
+    application.add_handler(CommandHandler("setmembershipmessage", set_membership_message_command))
     
     # Pool commands
     application.add_handler(CommandHandler("pools", bot.pool_handlers.handle_pools_command))

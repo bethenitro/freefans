@@ -1,0 +1,7 @@
+{
+  "channels": [],
+  "bypass_for_admins": true,
+  "bypass_for_workers": false,
+  "welcome_message": "Welcome! To use this bot, please join our required channels first.",
+  "membership_check_message": "Please join the following channels to use the bot:"
+}

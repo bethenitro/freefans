@@ -46,6 +46,25 @@ telegram_bot/
 - `📝 Request Creator` - Request a new creator to be added (menu button)
 - `🎯 Request Content` - Request specific content from a creator (menu button)
 
+**Note:** Users must join all required channels (configured by admins) before they can use the bot's features.
+
+### 📢 **Channel Membership System**
+
+The bot includes a channel membership verification system that requires users to join specific channels before accessing bot features.
+
+#### How It Works
+1. **Admin Configuration**: Admins add required channels using `/addrequiredchannel`
+2. **User Verification**: When users try to use the bot, membership is automatically checked
+3. **Join Prompts**: Users who haven't joined all channels see join buttons and instructions
+4. **Bypass Options**: Admins can configure bypass rules for admins/workers
+
+#### Channel Management Features
+- **Multiple Channels**: Support for multiple required channels
+- **Auto-Detection**: Bot automatically detects channel names and creates join links
+- **Custom Messages**: Customizable welcome and membership check messages
+- **Bypass Rules**: Configurable bypass for admins and workers
+- **Real-time Checking**: Membership verified in real-time when users interact with bot
+
 ### 👑 **Main Admin Commands**
 
 #### User Management
@@ -83,6 +102,14 @@ telegram_bot/
 - `/createpool manual <creator> <title> <type> <total_cost> [description]` - Create manual pool
 - `/completepool <pool_id> <content_url>` - Mark pool as completed and deliver content
 - `/cancelpool <pool_id> [reason]` - Cancel pool and refund all contributors
+
+#### Channel Management System
+- `/addrequiredchannel <channel_id> <channel_name> [channel_link]` - Add required channel
+- `/removerequiredchannel <channel_id>` - Remove required channel
+- `/listrequiredchannels` - List all required channels
+- `/channelsettings` - Configure channel membership settings
+- `/setwelcomemessage <text>` - Set custom welcome message
+- `/setmembershipmessage <text>` - Set custom membership check message
 
 ### 🔧 **Sub-Admin Commands**
 
@@ -225,6 +252,64 @@ LANDING_BASE_URL=https://your-landing-server.com
 
 # Supabase Database (required for pooling system)
 SUPABASE_DATABASE_URL=postgresql://user:password@host:port/database
+
+# Admin Setup Password (for first-time main admin setup)
+ADMIN_SETUP_PASSWORD=your_secure_password_here
+```
+
+### 6. Set Up Channel Requirements (Optional)
+
+The bot includes a channel membership verification system. To require users to join specific channels:
+
+#### Step 1: Add the Bot to Your Channels
+1. Add your bot as an **administrator** to each channel you want to require
+2. Give the bot permission to see members (needed to check membership)
+
+#### Step 2: Configure Required Channels
+```bash
+# Add a public channel
+/addrequiredchannel @yourchannel "Your Channel Name"
+
+# Add a private channel (get channel ID from @userinfobot)
+/addrequiredchannel -1001234567890 "Private Channel" https://t.me/+InviteLink
+
+# List all required channels
+/listrequiredchannels
+
+# Configure settings
+/channelsettings
+```
+
+#### Step 3: Customize Messages (Optional)
+```bash
+# Set welcome message
+/setwelcomemessage Welcome! Join our channels to access exclusive content.
+
+# Set membership check message
+/setmembershipmessage Please join these channels to use the bot:
+```
+
+#### Channel Management Features
+- **Bypass Rules**: Configure if admins/workers can bypass channel requirements
+- **Multiple Channels**: Users must join ALL required channels
+- **Real-time Verification**: Membership checked every time user interacts with bot
+- **Custom Messages**: Personalize welcome and membership messages
+- **Auto-detection**: Bot automatically gets channel names and creates join buttons
+
+#### Example Setup
+```bash
+# Add main channel
+/addrequiredchannel @freefanschannel "FreeFans Updates"
+
+# Add VIP channel  
+/addrequiredchannel @freefansvip "FreeFans VIP" https://t.me/+VipInviteLink
+
+# Configure to allow admins to bypass
+/channelsettings
+# Use buttons to toggle "Admin Bypass: ON"
+
+# Set custom welcome
+/setwelcomemessage 🔥 Welcome to FreeFans! Join our channels for exclusive access to premium content.
 ```
 
 ## Running the Bot

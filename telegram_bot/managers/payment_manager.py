@@ -118,7 +118,7 @@ class PaymentManager:
         
         title = f"Purchase {pkg['title']}"
         prices = [LabeledPrice(pkg['title'], pkg['price'])]
-        description = f"Buy {pkg['stars']} Telegram Stars for pool contributions"
+        description = f"Buy {pkg['stars']} Telegram Stars for getting exclusive content for cheap"
         
         return title, prices, description
     

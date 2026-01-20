@@ -66,7 +66,9 @@ No active pools right now!
                 text += f"{progress_bar}\n"
                 
                 # Calculate days remaining
-                days_left = (pool['expires_at'] - datetime.now()).days
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
+                days_left = (pool['expires_at'] - now).days
                 if days_left > 0:
                     text += f"⏰ {days_left} days left\n\n"
                 else:
@@ -182,7 +184,9 @@ No active pools right now!
                     text += f"• +{additional} more contributors: {future_price} ⭐ each\n"
         
         # Show expiration
-        days_left = (pool['expires_at'] - datetime.now()).days
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        days_left = (pool['expires_at'] - now).days
         if days_left > 0:
             text += f"\n⏰ **Expires in:** {days_left} days"
         else:
