@@ -36,6 +36,11 @@ class UserSession:
         self.awaiting_request = None  # 'creator' or 'content' or 'search'
         self.request_data = {}  # Store request details step by step
         
+        # Pool system
+        self.awaiting_pool_creation = None  # 'creator_name', 'content_title', 'content_description', 'target_amount'
+        self.pool_creation_data = {}  # Store pool creation details step by step
+        self.awaiting_custom_contribution = None  # pool_id when waiting for custom contribution amount
+        
         # Admin setup system
         self.awaiting_admin_setup_password = False  # Flag for password entry
         self.awaiting_admin_removal_confirmation = False  # Flag for removal confirmation

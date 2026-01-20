@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from shared.data.models import Creator, OnlyFansUser, OnlyFansPost, LandingPage
+from shared.data.models import Creator, OnlyFansUser, OnlyFansPost, LandingPage, UserProfile, ContentPool, PoolContribution, Transaction
 
 logger = logging.getLogger(__name__)
 
@@ -616,3 +616,329 @@ def get_random_creator_with_content(db: Session, min_items: int = 25) -> Optiona
     except Exception as e:
         logger.error(f"✗ Failed to get random creator: {e}")
         return None
+
+# Pool System CRUD Operations
+
+def create_user_profile(db: Session, user_id: int, username: str = None) -> UserProfile:
+    """Create a new user profile."""
+    try:
+        profile = UserProfile(user_id=user_id, username=username)
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        logger.info(f"✓ Created user profile for {user_id}")
+        return profile
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to create user profile {user_id}: {e}")
+        raise
+
+def get_user_profile(db: Session, user_id: int) -> Optional[UserProfile]:
+    """Get user profile by user_id."""
+    return db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+
+def get_or_create_user_profile(db: Session, user_id: int, username: str = None) -> UserProfile:
+    """Get existing user profile or create new one."""
+    profile = get_user_profile(db, user_id)
+    if not profile:
+        profile = create_user_profile(db, user_id, username)
+    elif username and profile.username != username:
+        profile.username = username
+        db.commit()
+    return profile
+
+def update_user_balance(db: Session, user_id: int, amount_change: int, description: str = None) -> bool:
+    """Update user balance (positive for add, negative for deduct)."""
+    try:
+        profile = get_or_create_user_profile(db, user_id)
+        
+        if amount_change < 0 and profile.balance < abs(amount_change):
+            return False  # Insufficient balance
+        
+        profile.balance += amount_change
+        if amount_change > 0:
+            # Adding balance doesn't count as spending
+            pass
+        else:
+            # Deducting balance counts as spending
+            profile.total_spent += abs(amount_change)
+        
+        db.commit()
+        logger.info(f"✓ Updated balance for user {user_id}: {amount_change:+d} Stars")
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to update balance for user {user_id}: {e}")
+        return False
+
+def create_content_pool(db: Session, pool_id: str, creator_name: str, content_title: str,
+                       content_description: str, content_type: str, total_cost: int,
+                       created_by: int, expires_at: datetime, max_contributors: int = 100,
+                       request_id: str = None) -> ContentPool:
+    """Create a new content pool with dynamic pricing."""
+    try:
+        # Calculate initial price per user
+        initial_price = max(1, total_cost // max_contributors)
+        
+        pool = ContentPool(
+            pool_id=pool_id,
+            creator_name=creator_name,
+            content_title=content_title,
+            content_description=content_description,
+            content_type=content_type,
+            total_cost=total_cost,
+            current_price_per_user=initial_price,
+            max_contributors=max_contributors,
+            created_by=created_by,
+            expires_at=expires_at,
+            request_id=request_id
+        )
+        db.add(pool)
+        db.commit()
+        db.refresh(pool)
+        logger.info(f"✓ Created content pool {pool_id}")
+        return pool
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to create content pool {pool_id}: {e}")
+        raise
+
+def get_content_pool(db: Session, pool_id: str) -> Optional[ContentPool]:
+    """Get content pool by pool_id."""
+    return db.query(ContentPool).filter(ContentPool.pool_id == pool_id).first()
+
+def get_active_pools(db: Session, limit: int = 10, creator_filter: str = None) -> List[ContentPool]:
+    """Get active content pools."""
+    try:
+        query = db.query(ContentPool).filter(
+            ContentPool.status == 'active',
+            ContentPool.expires_at > datetime.utcnow()
+        )
+        
+        if creator_filter:
+            query = query.filter(ContentPool.creator_name.ilike(f"%{creator_filter}%"))
+        
+        pools = query.order_by(desc(ContentPool.created_at)).limit(limit).all()
+        return pools
+    except Exception as e:
+        logger.error(f"✗ Failed to get active pools: {e}")
+        return []
+
+def update_pool_progress(db: Session, pool_id: str, amount_added: int) -> Optional[ContentPool]:
+    """Update pool progress when contribution is made."""
+    try:
+        pool = get_content_pool(db, pool_id)
+        if not pool:
+            return None
+        
+        pool.current_amount += amount_added
+        pool.contributors_count += 1
+        pool.completion_percentage = (pool.current_amount / pool.total_cost * 100) if pool.total_cost > 0 else 0
+        
+        # Check if pool is completed
+        if pool.current_amount >= pool.total_cost:
+            pool.status = 'completed'
+            pool.completed_at = datetime.utcnow()
+        
+        db.commit()
+        db.refresh(pool)
+        logger.info(f"✓ Updated pool {pool_id} progress: {pool.current_amount}/{pool.total_cost}")
+        return pool
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to update pool progress {pool_id}: {e}")
+        raise
+
+def complete_pool(db: Session, pool_id: str, content_url: str, landing_page_id: str = None) -> bool:
+    """Mark pool as completed and set content URL."""
+    try:
+        pool = get_content_pool(db, pool_id)
+        if not pool:
+            return False
+        
+        pool.status = 'completed'
+        pool.completed_at = datetime.utcnow()
+        pool.content_url = content_url
+        if landing_page_id:
+            pool.landing_page_id = landing_page_id
+        
+        db.commit()
+        logger.info(f"✓ Completed pool {pool_id}")
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to complete pool {pool_id}: {e}")
+        return False
+
+def cancel_pool(db: Session, pool_id: str) -> bool:
+    """Cancel a pool and mark contributions for refund."""
+    try:
+        pool = get_content_pool(db, pool_id)
+        if not pool:
+            return False
+        
+        pool.status = 'cancelled'
+        
+        # Mark all contributions as refunded
+        contributions = db.query(PoolContribution).filter(
+            PoolContribution.pool_id == pool_id,
+            PoolContribution.status == 'completed'
+        ).all()
+        
+        for contrib in contributions:
+            contrib.status = 'refunded'
+        
+        db.commit()
+        logger.info(f"✓ Cancelled pool {pool_id} with {len(contributions)} refunds")
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to cancel pool {pool_id}: {e}")
+        return False
+
+def create_pool_contribution(db: Session, contribution_id: str, user_id: int, pool_id: str,
+                           amount: int, payment_charge_id: str = None) -> PoolContribution:
+    """Create a new pool contribution."""
+    try:
+        contribution = PoolContribution(
+            contribution_id=contribution_id,
+            user_id=user_id,
+            pool_id=pool_id,
+            amount=amount,
+            payment_charge_id=payment_charge_id,
+            status='completed'
+        )
+        db.add(contribution)
+        db.commit()
+        db.refresh(contribution)
+        logger.info(f"✓ Created pool contribution {contribution_id}")
+        return contribution
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to create pool contribution {contribution_id}: {e}")
+        raise
+
+def get_user_contributions(db: Session, user_id: int, limit: int = 10) -> List[tuple]:
+    """Get user's pool contributions with pool details."""
+    try:
+        contributions = db.query(PoolContribution, ContentPool).join(
+            ContentPool, PoolContribution.pool_id == ContentPool.pool_id
+        ).filter(
+            PoolContribution.user_id == user_id
+        ).order_by(desc(PoolContribution.created_at)).limit(limit).all()
+        
+        return contributions
+    except Exception as e:
+        logger.error(f"✗ Failed to get user contributions for {user_id}: {e}")
+        return []
+
+def get_pool_contributors(db: Session, pool_id: str) -> List[PoolContribution]:
+    """Get all contributors for a pool."""
+    try:
+        contributions = db.query(PoolContribution).filter(
+            PoolContribution.pool_id == pool_id,
+            PoolContribution.status == 'completed'
+        ).order_by(desc(PoolContribution.created_at)).all()
+        
+        return contributions
+    except Exception as e:
+        logger.error(f"✗ Failed to get pool contributors for {pool_id}: {e}")
+        return []
+
+def create_transaction(db: Session, transaction_id: str, user_id: int, transaction_type: str,
+                      amount: int, pool_id: str = None, contribution_id: str = None,
+                      payment_charge_id: str = None, description: str = None) -> Transaction:
+    """Create a new transaction record."""
+    try:
+        transaction = Transaction(
+            transaction_id=transaction_id,
+            user_id=user_id,
+            transaction_type=transaction_type,
+            amount=amount,
+            pool_id=pool_id,
+            contribution_id=contribution_id,
+            payment_charge_id=payment_charge_id,
+            status='completed',
+            description=description
+        )
+        db.add(transaction)
+        db.commit()
+        db.refresh(transaction)
+        logger.info(f"✓ Created transaction {transaction_id}")
+        return transaction
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to create transaction {transaction_id}: {e}")
+        raise
+
+def get_user_transactions(db: Session, user_id: int, limit: int = 10) -> List[Transaction]:
+    """Get user's transaction history."""
+    try:
+        transactions = db.query(Transaction).filter(
+            Transaction.user_id == user_id
+        ).order_by(desc(Transaction.created_at)).limit(limit).all()
+        
+        return transactions
+    except Exception as e:
+        logger.error(f"✗ Failed to get user transactions for {user_id}: {e}")
+        return []
+
+def cleanup_expired_pools(db: Session) -> int:
+    """Clean up expired pools and process refunds."""
+    try:
+        now = datetime.utcnow()
+        expired_pools = db.query(ContentPool).filter(
+            ContentPool.status == 'active',
+            ContentPool.expires_at < now
+        ).all()
+        
+        count = 0
+        for pool in expired_pools:
+            if cancel_pool(db, pool.pool_id):
+                count += 1
+        
+        logger.info(f"✓ Cleaned up {count} expired pools")
+        return count
+    except Exception as e:
+        logger.error(f"✗ Failed to cleanup expired pools: {e}")
+        return 0
+
+def get_pool_stats(db: Session) -> Dict[str, Any]:
+    """Get pool system statistics."""
+    try:
+        total_pools = db.query(ContentPool).count()
+        active_pools = db.query(ContentPool).filter(ContentPool.status == 'active').count()
+        completed_pools = db.query(ContentPool).filter(ContentPool.status == 'completed').count()
+        total_contributions = db.query(PoolContribution).count()
+        total_users = db.query(UserProfile).count()
+        
+        # Calculate total Stars in system
+        total_stars_result = db.query(func.sum(UserProfile.balance)).scalar()
+        total_stars = total_stars_result or 0
+        
+        # Calculate total contributed
+        total_contributed_result = db.query(func.sum(PoolContribution.amount)).filter(
+            PoolContribution.status == 'completed'
+        ).scalar()
+        total_contributed = total_contributed_result or 0
+        
+        return {
+            'total_pools': total_pools,
+            'active_pools': active_pools,
+            'completed_pools': completed_pools,
+            'total_contributions': total_contributions,
+            'total_users': total_users,
+            'total_stars_in_system': total_stars,
+            'total_stars_contributed': total_contributed
+        }
+    except Exception as e:
+        logger.error(f"✗ Failed to get pool stats: {e}")
+        return {
+            'total_pools': 0,
+            'active_pools': 0,
+            'completed_pools': 0,
+            'total_contributions': 0,
+            'total_users': 0,
+            'total_stars_in_system': 0,
+            'total_stars_contributed': 0
+        }

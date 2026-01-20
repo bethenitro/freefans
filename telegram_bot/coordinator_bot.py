@@ -35,6 +35,10 @@ from managers.permissions_manager import get_permissions_manager
 from managers.request_manager import get_request_manager
 from managers.title_manager import get_title_manager
 
+# Import pool components
+from bot.pool_handlers import get_pool_handlers
+from bot.admin_pool_handlers import get_admin_pool_handlers
+
 # Import UI components
 from bot.ui_components import (
     format_directory_text, create_content_directory_keyboard,
@@ -66,6 +70,10 @@ class CoordinatorBot:
         self.cache_manager = get_cache_manager()
         self.content_manager = ContentManager(self.cache_manager)
         
+        # Initialize pool handlers
+        self.pool_handlers = get_pool_handlers()
+        self.admin_pool_handlers = get_admin_pool_handlers()
+        
         logger.info("✅ Coordinator Bot initialized (Celery + RabbitMQ mode)")
     
     # ==================== COMMAND HANDLERS ====================
@@ -93,6 +101,7 @@ What I can do for you:
         keyboard = [
             [KeyboardButton("🔍 Search Creator")],
             [KeyboardButton("🎲 Random Creator")],
+            [KeyboardButton("🏊‍♀️ Community Pools")],
             [KeyboardButton("📝 Request Creator"), KeyboardButton("🎯 Request Content")],
             [KeyboardButton("❓ Help")]
         ]
@@ -120,8 +129,13 @@ Don't see a creator? Request them to be added!
 🎯 Request Content  
 Looking for specific content from a creator? Let me know!
 
+🏊‍♀️ Community Pools
+Join community pools to unlock exclusive content! Multiple users contribute small amounts to reach the target, then everyone gets access.
+
 ⚡ Quick Commands
 /start - Get started with the bot
+/pools - View active community pools
+/balance - Check your Star balance
 /help - Show this guide again
 /cancel - Cancel current operation
 """
@@ -138,6 +152,11 @@ Looking for specific content from a creator? Let me know!
             help_text += "/requests - View pending user requests\n"
             help_text += "/titles - View pending title submissions\n"
             help_text += "/adminstats - View system statistics\n"
+            help_text += "/createpool - Create a new community pool\n"
+            help_text += "/poolstats - View pool system statistics\n"
+            help_text += "/completepool - Mark a pool as completed\n"
+            help_text += "/cancelpool - Cancel a pool and refund contributors\n"
+            help_text += "/poolrequests - View pending requests for pool creation\n"
         elif permissions.is_admin(user_id):
             help_text += "\n\n🔧 **Admin Commands:**\n\n"
             help_text += "/addworker <user_id> - Add a worker\n"
@@ -146,6 +165,11 @@ Looking for specific content from a creator? Let me know!
             help_text += "/requests - View pending user requests\n"
             help_text += "/titles - View pending title submissions\n"
             help_text += "/adminstats - View system statistics\n"
+            help_text += "/createpool - Create a new community pool\n"
+            help_text += "/poolstats - View pool system statistics\n"
+            help_text += "/completepool - Mark a pool as completed\n"
+            help_text += "/cancelpool - Cancel a pool and refund contributors\n"
+            help_text += "/poolrequests - View pending requests for pool creation\n"
         
         # Add worker commands if user is worker
         if permissions.is_worker(user_id):
@@ -1047,12 +1071,20 @@ Welcome, worker! Your job is to help improve video titles in our content library
             )
             return
         
+        elif text == "🏊‍♀️ Community Pools":
+            await self.pool_handlers.handle_pools_command(update, context)
+            return
+        
         elif text == "❓ Help":
             await self.help_command(update, context)
             return
         
         # Handle request flows
         if await self._handle_request_flow(update, context, text, session):
+            return
+        
+        # Handle pool custom contribution amounts
+        if await self.pool_handlers.handle_custom_amount_message(update, context):
             return
         
         # Handle search input
@@ -1388,6 +1420,16 @@ Welcome, worker! Your job is to help improve video titles in our content library
             await self._handle_back_to_list(query, session)
         elif data == "view_of_feed":
             await self._handle_view_of_feed(query, session)
+        # Pool-related callbacks
+        elif (data.startswith("view_pool_") or data.startswith("contribute_") or 
+              data.startswith("custom_contribute_") or data == "my_balance" or 
+              data == "my_contributions" or data.startswith("buy_stars_") or 
+              data == "back_to_pools" or data == "buy_stars_menu"):
+            await self.pool_handlers.handle_pool_callback(update, context)
+        # Admin pool callbacks
+        elif (data == "admin_pool_stats" or data == "admin_view_pools" or 
+              data == "admin_cleanup_pools"):
+            await self.admin_pool_handlers.handle_admin_callback(update, context)
         else:
             await query.answer("Feature coming soon!", show_alert=True)
     
@@ -1690,6 +1732,35 @@ def main():
     # Worker commands
     application.add_handler(CommandHandler("mystats", bot.worker_stats_command))
     application.add_handler(CommandHandler("workerhelp", bot.workerhelp_command))
+    
+    # Pool commands
+    application.add_handler(CommandHandler("pools", bot.pool_handlers.handle_pools_command))
+    
+    # Create a wrapper for balance command
+    async def balance_command_wrapper(update, context):
+        # Create a fake callback query for the balance handler
+        from telegram import CallbackQuery
+        fake_query = type('FakeQuery', (), {
+            'from_user': update.effective_user,
+            'message': update.message,
+            'edit_message_text': update.message.reply_text,
+            'answer': lambda: None
+        })()
+        await bot.pool_handlers._handle_my_balance(fake_query)
+    
+    application.add_handler(CommandHandler("balance", balance_command_wrapper))
+    
+    # Admin pool commands
+    application.add_handler(CommandHandler("createpool", bot.admin_pool_handlers.handle_create_pool_command))
+    application.add_handler(CommandHandler("poolstats", bot.admin_pool_handlers.handle_pool_stats_command))
+    application.add_handler(CommandHandler("completepool", bot.admin_pool_handlers.handle_complete_pool_command))
+    application.add_handler(CommandHandler("cancelpool", bot.admin_pool_handlers.handle_cancel_pool_command))
+    application.add_handler(CommandHandler("poolrequests", bot.admin_pool_handlers.handle_requests_command))
+    
+    # Payment handlers
+    from telegram.ext import PreCheckoutQueryHandler
+    application.add_handler(PreCheckoutQueryHandler(bot.pool_handlers.handle_successful_payment))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, bot.pool_handlers.handle_successful_payment))
     
     # Callback and message handlers
     application.add_handler(CallbackQueryHandler(bot.handle_callback))
