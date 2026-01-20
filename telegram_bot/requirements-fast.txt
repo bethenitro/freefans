@@ -1,0 +1,14 @@
+# Performance-Optimized Libraries for FreeFans Bot
+# Install with: pip install -r requirements-fast.txt
+
+# 🚀 FAST JSON PARSER (2-4x faster than standard json)
+ujson==5.10.0
+
+# 🚀 FAST HTML PARSER (10-100x faster than BeautifulSoup for simple tasks)
+selectolax==0.3.27
+
+# 🚀 OPTIMIZED XML/HTML PARSER (2-5x faster than html.parser - already using lxml in code)
+# lxml is already in main requirements.txt
+
+# Note: pandas and rapidfuzz are already in main requirements.txt
+# These provide fast CSV operations and fuzzy matching

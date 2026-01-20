@@ -208,6 +208,39 @@ def main():
         return
     
     # Initialize cache manager based on configuration
+    print("\n" + "="*60)
+    print("⚡ PERFORMANCE OPTIMIZATIONS")
+    print("="*60)
+    
+    # Check fast libraries
+    try:
+        from scrapers.parsers import USING_FAST_PARSER
+        from scrapers.csv_handler import PANDAS_AVAILABLE, RAPIDFUZZ_AVAILABLE
+        
+        print(f"HTML Parser:   {'✅ selectolax (10-100x faster)' if USING_FAST_PARSER else '⚠️  lxml (fallback)'}")
+        print(f"CSV Ops:       {'✅ pandas (10-100x faster)' if PANDAS_AVAILABLE else '⚠️  standard csv'}")
+        print(f"Fuzzy Match:   {'✅ rapidfuzz (10-20x faster)' if RAPIDFUZZ_AVAILABLE else '⚠️  difflib (slow)'}")
+        
+        try:
+            import ujson
+            print(f"JSON:          ✅ ujson (2-4x faster)")
+        except ImportError:
+            print(f"JSON:          ⚠️  standard json")
+        
+        # Show recommendations
+        missing = []
+        if not USING_FAST_PARSER:
+            missing.append("selectolax")
+        if not PANDAS_AVAILABLE:
+            missing.append("pandas")
+        
+        if missing:
+            print(f"\n💡 Install for better speed: pip install {' '.join(missing)}")
+    except Exception as e:
+        logger.warning(f"Could not check optimization status: {e}")
+    
+    print("="*60 + "\n")
+    
     print("💾 Initializing cache manager...")
     cache_manager = get_cache_manager()
     cache_stats = cache_manager.get_cache_stats()

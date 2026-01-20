@@ -84,6 +84,11 @@ class BotLandingService:
         try:
             expires_at = datetime.now() + timedelta(hours=expires_hours)
             
+            # Log request details
+            logger.info(f"🔗 Requesting landing URL for: {creator_name} - {content_title} ({content_type})")
+            logger.debug(f"   Original URL: {original_url[:100]}...")
+            logger.debug(f"   Target server: {self.base_url}/api/generate-link")
+            
             # Call FastAPI server to generate landing URL with longer timeout
             client = await self._get_client()
             response = await client.post(
@@ -106,28 +111,40 @@ class BotLandingService:
                 # Convert localhost URL to external domain
                 landing_url = self._convert_localhost_url(landing_url)
                 has_preview = result.get('preview_url') is not None
-                logger.debug(f"✅ Generated landing URL via FastAPI: {landing_url}{' (with preview)' if has_preview else ''}")
+                logger.info(f"✅ Landing URL generated successfully: {landing_url}{' (with preview)' if has_preview else ''}")
                 
                 # Return the converted landing URL
                 return landing_url
             else:
-                error_msg = f"FastAPI server error (status {response.status_code}): {response.text}"
+                error_msg = f"❌ FastAPI server returned error status {response.status_code}"
                 logger.error(error_msg)
+                logger.error(f"   Response body: {response.text[:500]}")
+                logger.error(f"   Request: {content_type} - {creator_name}/{content_title}")
                 raise RuntimeError(error_msg)
                 
         except httpx.TimeoutException as e:
-            error_msg = "FastAPI server timeout - please try again"
+            error_msg = f"⏱️ FastAPI server timeout after 30s"
             logger.error(error_msg)
+            logger.error(f"   Server: {self.base_url}")
+            logger.error(f"   Content: {content_type} - {creator_name}/{content_title}")
+            logger.error(f"   Exception: {str(e)}")
             raise RuntimeError(error_msg) from e
         except httpx.ConnectError as e:
-            error_msg = "Cannot connect to FastAPI server - service may be down"
+            error_msg = f"🔌 Cannot connect to FastAPI server"
             logger.error(error_msg)
+            logger.error(f"   Server: {self.base_url}")
+            logger.error(f"   Is the landing server running?")
+            logger.error(f"   Exception: {str(e)}")
             raise RuntimeError(error_msg) from e
         except Exception as e:
             if isinstance(e, RuntimeError):
                 raise
-            error_msg = f"Error calling FastAPI server: {str(e)}"
+            error_msg = f"❌ Unexpected error calling FastAPI server"
             logger.error(error_msg)
+            logger.error(f"   Server: {self.base_url}")
+            logger.error(f"   Content: {content_type} - {creator_name}/{content_title}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            logger.error(f"   Exception: {str(e)}")
             raise RuntimeError(error_msg) from e
     
     async def generate_batch_landing_urls_async(
@@ -155,6 +172,10 @@ class BotLandingService:
                     'expires_at': expires_at.isoformat()
                 })
             
+            logger.info(f"🔗 Requesting batch landing URLs for {len(batch_items)} items")
+            logger.debug(f"   Target server: {self.base_url}/api/generate-batch-links")
+            logger.debug(f"   Content types: {[item['content_type'] for item in batch_items[:5]]}...")
+            
             # Call FastAPI server batch endpoint with longer timeout for preview extraction
             client = await self._get_client()
             response = await client.post(
@@ -167,39 +188,69 @@ class BotLandingService:
                 result = response.json()
                 # Convert all localhost URLs to external domain
                 urls = [self._convert_localhost_url(item['landing_url']) for item in result['results']]
-                logger.debug(f"✅ Generated {len(urls)} batch landing URLs via FastAPI")
+                logger.info(f"✅ Generated {len(urls)} batch landing URLs successfully")
                 return urls
             else:
-                error_msg = f"FastAPI batch error (status {response.status_code}): {response.text}"
+                error_msg = f"❌ FastAPI batch request returned error status {response.status_code}"
                 logger.error(error_msg)
+                logger.error(f"   Response body: {response.text[:500]}")
+                logger.error(f"   Batch size: {len(batch_items)} items")
                 raise RuntimeError(error_msg)
                 
         except httpx.TimeoutException as e:
-            error_msg = f"FastAPI batch timeout after 60s - {len(items)} items may need more time"
+            error_msg = f"⏱️ FastAPI batch request timeout after 60s"
             logger.error(error_msg)
+            logger.error(f"   Server: {self.base_url}")
+            logger.error(f"   Batch size: {len(items)} items")
+            logger.error(f"   Consider reducing batch size or increasing timeout")
+            logger.error(f"   Exception: {str(e)}")
             raise RuntimeError(error_msg) from e
         except httpx.ConnectError as e:
-            error_msg = "Cannot connect to FastAPI server - service may be down"
+            error_msg = f"🔌 Cannot connect to FastAPI server for batch request"
             logger.error(error_msg)
+            logger.error(f"   Server: {self.base_url}")
+            logger.error(f"   Batch size: {len(items)} items")
+            logger.error(f"   Is the landing server running?")
+            logger.error(f"   Exception: {str(e)}")
             raise RuntimeError(error_msg) from e
         except Exception as e:
             if isinstance(e, RuntimeError):
                 raise
-            error_msg = f"Error in batch FastAPI call: {str(e)}"
+            error_msg = f"❌ Unexpected error in batch FastAPI call"
             logger.error(error_msg)
+            logger.error(f"   Server: {self.base_url}")
+            logger.error(f"   Batch size: {len(items)} items")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            logger.error(f"   Exception: {str(e)}")
             raise RuntimeError(error_msg) from e
     
     async def test_server_connection(self) -> bool:
         """Test if the landing server is accessible"""
         if not self.enabled:
+            logger.info("🔌 Landing service is disabled - skipping connection test")
             return True  # Consider it "working" if disabled
         
         try:
+            logger.info(f"🔍 Testing connection to landing server: {self.base_url}")
             client = await self._get_client()
             response = await client.get(f"{self.base_url}/health")
-            return response.status_code == 200
+            is_connected = response.status_code == 200
+            if is_connected:
+                logger.info(f"✅ Landing server is healthy and reachable")
+            else:
+                logger.error(f"❌ Landing server returned status {response.status_code}")
+            return is_connected
+        except httpx.ConnectError as e:
+            logger.error(f"🔌 Landing server connection test failed - cannot connect")
+            logger.error(f"   Server: {self.base_url}")
+            logger.error(f"   Is the server running?")
+            logger.error(f"   Exception: {str(e)}")
+            return False
         except Exception as e:
-            logger.error(f"Landing server connection test failed: {e}")
+            logger.error(f"❌ Landing server connection test failed")
+            logger.error(f"   Server: {self.base_url}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            logger.error(f"   Exception: {str(e)}")
             return False
     
     async def extract_video_preview(self, video_url: str, creator_name: str = "Unknown", content_title: str = "Video") -> Optional[str]:
@@ -218,6 +269,9 @@ class BotLandingService:
             return None
         
         try:
+            logger.info(f"🎬 Extracting video preview for: {creator_name} - {content_title}")
+            logger.debug(f"   Video URL: {video_url[:100]}...")
+            
             client = await self._get_client()
             response = await client.post(
                 f"{self.base_url}/api/extract-video-preview",
@@ -233,23 +287,32 @@ class BotLandingService:
                 result = response.json()
                 preview_url = result.get('preview_url')
                 if preview_url:
-                    logger.debug(f"✅ Extracted preview via FastAPI: {preview_url}")
+                    logger.info(f"✅ Video preview extracted successfully")
+                    logger.debug(f"   Preview URL: {preview_url[:100]}...")
                     return preview_url
                 else:
-                    logger.debug(f"ℹ️ No preview found for video: {video_url}")
+                    logger.info(f"ℹ️ No preview found for video")
                     return None
             else:
-                logger.error(f"FastAPI preview extraction error (status {response.status_code}): {response.text}")
+                logger.error(f"❌ FastAPI preview extraction returned error status {response.status_code}")
+                logger.error(f"   Response body: {response.text[:500]}")
                 return None
                 
-        except httpx.TimeoutException:
-            logger.warning(f"Timeout calling FastAPI for preview extraction")
+        except httpx.TimeoutException as e:
+            logger.warning(f"⏱️ Timeout extracting video preview after 15s")
+            logger.warning(f"   Video: {creator_name} - {content_title}")
+            logger.debug(f"   Exception: {str(e)}")
             return None
-        except httpx.ConnectError:
-            logger.warning(f"Cannot connect to FastAPI server for preview extraction")
+        except httpx.ConnectError as e:
+            logger.warning(f"🔌 Cannot connect to FastAPI for preview extraction")
+            logger.warning(f"   Server: {self.base_url}")
+            logger.debug(f"   Exception: {str(e)}")
             return None
         except Exception as e:
-            logger.error(f"Error calling FastAPI for preview extraction: {e}")
+            logger.error(f"❌ Error extracting video preview")
+            logger.error(f"   Video: {creator_name} - {content_title}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            logger.error(f"   Exception: {str(e)}")
             return None
     
     def get_status(self) -> Dict[str, Any]:
