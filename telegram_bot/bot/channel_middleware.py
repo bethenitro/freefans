@@ -96,11 +96,17 @@ async def handle_check_membership_callback(update: Update, context: ContextTypes
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(
-                f"✅ **Welcome!**\n\n{welcome_message}\n\nYou can now use all bot features!",
-                parse_mode='Markdown',
-                reply_markup=reply_markup
-            )
+            try:
+                await query.edit_message_text(
+                    f"✅ **Welcome!**\n\n{welcome_message}\n\nYou can now use all bot features!",
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                if "message is not modified" in str(e).lower():
+                    await query.answer("✅ You're already verified!")
+                else:
+                    raise
         else:
             # User still hasn't joined all channels
             message = channel_manager.get_membership_message(missing_channels)
@@ -116,11 +122,20 @@ async def handle_check_membership_callback(update: Update, context: ContextTypes
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+            try:
+                await query.edit_message_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+            except Exception as e:
+                if "message is not modified" in str(e).lower():
+                    await query.answer("Please join the required channels first")
+                else:
+                    raise
             
     except Exception as e:
         logger.error(f"Error handling check membership callback: {e}")
-        await query.edit_message_text("❌ Error checking membership. Please try again.")
+        try:
+            await query.edit_message_text("❌ Error checking membership. Please try again.")
+        except Exception:
+            await query.answer("❌ Error checking membership")
 
 
 def create_membership_check_keyboard(missing_channels):

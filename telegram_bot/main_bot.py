@@ -111,11 +111,81 @@ class FreeFansBot:
             logger.error(f"Error in channel membership check: {e}")
             return True  # On error, allow execution (fail open)
 
+    async def _universal_channel_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """
+        Universal channel membership check for ALL interactions.
+        Returns True if user can proceed, False if blocked.
+        """
+        try:
+            user_id = update.effective_user.id
+            from managers.channel_manager import get_channel_manager
+            from managers.permissions_manager import get_permissions_manager
+            
+            channel_manager = get_channel_manager()
+            permissions_manager = get_permissions_manager()
+            
+            # Always allow main admin
+            if permissions_manager.is_main_admin(user_id):
+                return True
+            
+            # Check if there are any required channels
+            required_channels = channel_manager.get_required_channels()
+            if not required_channels:
+                return True  # No channels required
+            
+            # Check if user should bypass
+            if channel_manager._should_bypass_user(user_id):
+                return True
+            
+            # Check membership
+            is_member, missing_channels = await channel_manager.check_user_membership(user_id, context)
+            
+            if not is_member:
+                # User is not member of all required channels - BLOCK EVERYTHING
+                message = "🚫 **Access Restricted**\n\n"
+                message += "You must join ALL required channels before using this bot.\n\n"
+                message += "**Required Channels:**\n"
+                
+                for i, channel in enumerate(missing_channels, 1):
+                    channel_name = channel.get('channel_name', 'Unknown Channel')
+                    message += f"{i}. {channel_name}\n"
+                
+                message += "\n💡 Join all channels, then send /start to begin!"
+                
+                # Create join buttons
+                keyboard = []
+                for channel in missing_channels[:5]:  # Limit to 5 buttons
+                    channel_name = channel.get('channel_name', 'Join Channel')
+                    channel_link = channel.get('channel_link', '#')
+                    keyboard.append([InlineKeyboardButton(f"📢 Join {channel_name}", url=channel_link)])
+                
+                # Add check membership button
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_membership")])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                # Send blocking message
+                if update.message:
+                    await update.message.reply_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+                elif update.callback_query:
+                    try:
+                        await update.callback_query.edit_message_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+                    except Exception:
+                        await update.callback_query.answer("❌ You must join required channels first!")
+                
+                return False  # Block execution
+                
+            return True  # Allow execution
+            
+        except Exception as e:
+            logger.error(f"Error in universal channel check: {e}")
+            return True  # On error, allow execution (fail open)
+
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send a message when the command /start is issued."""
-        # Check channel membership first
-        if not await self._check_channel_membership(update, context):
+        # Universal channel membership check
+        if not await self._universal_channel_check(update, context):
             return  # User blocked by channel requirements
         
         # User is member of all required channels, execute start command
@@ -123,10 +193,18 @@ class FreeFansBot:
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send a message when the command /help is issued."""
+        # Universal channel membership check
+        if not await self._universal_channel_check(update, context):
+            return  # User blocked by channel requirements
+        
         await help_command(update, context)
     
     async def cache_stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show cache statistics."""
+        # Universal channel membership check
+        if not await self._universal_channel_check(update, context):
+            return  # User blocked by channel requirements
+        
         try:
             cache_stats = self.cache_manager.get_cache_stats()
             
@@ -166,8 +244,8 @@ class FreeFansBot:
 
     async def handle_creator_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle creator name input and search for content."""
-        # Check channel membership first
-        if not await self._check_channel_membership(update, context):
+        # Universal channel membership check - BLOCKS ALL TEXT MESSAGES
+        if not await self._universal_channel_check(update, context):
             return  # User blocked by channel requirements
         
         # Check if this is admin setup password first
@@ -222,6 +300,12 @@ class FreeFansBot:
         """Handle callback queries from inline keyboards."""
         query = update.callback_query
         data = query.data
+        
+        # Universal channel membership check - BLOCKS ALL CALLBACK QUERIES
+        # Exception: Allow "check_membership" callback to work
+        if data != "check_membership":
+            if not await self._universal_channel_check(update, context):
+                return  # User blocked by channel requirements
         
         # Route pool-related callbacks to pool handlers
         if (data.startswith("view_pool_") or data.startswith("contribute_") or 
@@ -370,50 +454,75 @@ def main():
     # Initialize bot with cache manager
     bot = FreeFansBot()
     
-    # Register handlers
+    # Create universal wrapper function for channel checking
+    def create_channel_protected_handler(handler_func, bot_instance=None):
+        """Create a wrapper that checks channel membership before executing handler."""
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            # Use bot instance if provided, otherwise use the main bot
+            bot_to_use = bot_instance or bot
+            
+            # Universal channel membership check
+            if not await bot_to_use._universal_channel_check(update, context):
+                return  # User blocked by channel requirements
+            
+            # Execute original handler
+            if bot_instance:
+                return await handler_func(update, context, bot_instance)
+            else:
+                return await handler_func(update, context)
+        return wrapper
+    
+    # Register handlers with channel protection
     application.add_handler(CommandHandler("start", bot.start))
     application.add_handler(CommandHandler("help", bot.help_command))
     application.add_handler(CommandHandler("cache", bot.cache_stats_command))
-    application.add_handler(CommandHandler("cancel", lambda update, context: cancel_command(update, context, bot)))
+    application.add_handler(CommandHandler("cancel", create_channel_protected_handler(cancel_command, bot)))
     
-    # Admin commands
-    application.add_handler(CommandHandler("setupmainadmin", lambda update, context: setupmainadmin_command(update, context, bot)))
-    application.add_handler(CommandHandler("removemainadmin", lambda update, context: removemainadmin_command(update, context, bot)))
-    application.add_handler(CommandHandler("confirmmainadminremoval", lambda update, context: confirmmainadminremoval_command(update, context, bot)))
-    application.add_handler(CommandHandler("addadmin", addadmin_command))
-    application.add_handler(CommandHandler("removeadmin", removeadmin_command))
-    application.add_handler(CommandHandler("addworker", addworker_command))
-    application.add_handler(CommandHandler("removeworker", removeworker_command))
-    application.add_handler(CommandHandler("listadmins", listadmins_command))
-    application.add_handler(CommandHandler("listworkers", listworkers_command))
-    application.add_handler(CommandHandler("deletions", deletions_command))
-    application.add_handler(CommandHandler("approvedelete", approvedelete_command))
-    application.add_handler(CommandHandler("rejectdelete", rejectdelete_command))
-    application.add_handler(CommandHandler("requests", admin_requests_command))
-    application.add_handler(CommandHandler("titles", admin_titles_command))
-    application.add_handler(CommandHandler("approve", approve_title_command))
-    application.add_handler(CommandHandler("reject", reject_title_command))
-    application.add_handler(CommandHandler("bulkapprove", bulk_approve_command))
-    application.add_handler(CommandHandler("bulkreject", bulk_reject_command))
-    application.add_handler(CommandHandler("adminstats", admin_stats_command))
+    # Admin commands (these should bypass channel checks via permissions)
+    application.add_handler(CommandHandler("setupmainadmin", create_channel_protected_handler(setupmainadmin_command, bot)))
+    application.add_handler(CommandHandler("removemainadmin", create_channel_protected_handler(removemainadmin_command, bot)))
+    application.add_handler(CommandHandler("confirmmainadminremoval", create_channel_protected_handler(confirmmainadminremoval_command, bot)))
+    application.add_handler(CommandHandler("addadmin", create_channel_protected_handler(addadmin_command)))
+    application.add_handler(CommandHandler("removeadmin", create_channel_protected_handler(removeadmin_command)))
+    application.add_handler(CommandHandler("addworker", create_channel_protected_handler(addworker_command)))
+    application.add_handler(CommandHandler("removeworker", create_channel_protected_handler(removeworker_command)))
+    application.add_handler(CommandHandler("listadmins", create_channel_protected_handler(listadmins_command)))
+    application.add_handler(CommandHandler("listworkers", create_channel_protected_handler(listworkers_command)))
+    application.add_handler(CommandHandler("deletions", create_channel_protected_handler(deletions_command)))
+    application.add_handler(CommandHandler("approvedelete", create_channel_protected_handler(approvedelete_command)))
+    application.add_handler(CommandHandler("rejectdelete", create_channel_protected_handler(rejectdelete_command)))
+    application.add_handler(CommandHandler("requests", create_channel_protected_handler(admin_requests_command)))
+    application.add_handler(CommandHandler("titles", create_channel_protected_handler(admin_titles_command)))
+    application.add_handler(CommandHandler("approve", create_channel_protected_handler(approve_title_command)))
+    application.add_handler(CommandHandler("reject", create_channel_protected_handler(reject_title_command)))
+    application.add_handler(CommandHandler("bulkapprove", create_channel_protected_handler(bulk_approve_command)))
+    application.add_handler(CommandHandler("bulkreject", create_channel_protected_handler(bulk_reject_command)))
+    application.add_handler(CommandHandler("adminstats", create_channel_protected_handler(admin_stats_command)))
     
     # Worker commands
-    application.add_handler(CommandHandler("mystats", worker_stats_command))
-    application.add_handler(CommandHandler("workerhelp", worker_help_command))
+    application.add_handler(CommandHandler("mystats", create_channel_protected_handler(worker_stats_command)))
+    application.add_handler(CommandHandler("workerhelp", create_channel_protected_handler(worker_help_command)))
     
-    # Channel management commands (admin only)
-    application.add_handler(CommandHandler("addrequiredchannel", add_required_channel_command))
-    application.add_handler(CommandHandler("removerequiredchannel", remove_required_channel_command))
-    application.add_handler(CommandHandler("listrequiredchannels", list_required_channels_command))
-    application.add_handler(CommandHandler("channelsettings", channel_settings_command))
-    application.add_handler(CommandHandler("setwelcomemessage", set_welcome_message_command))
-    application.add_handler(CommandHandler("setmembershipmessage", set_membership_message_command))
+    # Channel management commands (admin only - these should bypass via permissions)
+    application.add_handler(CommandHandler("addrequiredchannel", create_channel_protected_handler(add_required_channel_command)))
+    application.add_handler(CommandHandler("removerequiredchannel", create_channel_protected_handler(remove_required_channel_command)))
+    application.add_handler(CommandHandler("listrequiredchannels", create_channel_protected_handler(list_required_channels_command)))
+    application.add_handler(CommandHandler("channelsettings", create_channel_protected_handler(channel_settings_command)))
+    application.add_handler(CommandHandler("setwelcomemessage", create_channel_protected_handler(set_welcome_message_command)))
+    application.add_handler(CommandHandler("setmembershipmessage", create_channel_protected_handler(set_membership_message_command)))
     
-    # Pool commands
-    application.add_handler(CommandHandler("pools", bot.pool_handlers.handle_pools_command))
+    # Pool commands with channel protection
+    async def pools_command_wrapper(update, context):
+        if not await bot._universal_channel_check(update, context):
+            return
+        await bot.pool_handlers.handle_pools_command(update, context)
+    
+    application.add_handler(CommandHandler("pools", pools_command_wrapper))
     
     # Create a wrapper for balance command
     async def balance_command_wrapper(update, context):
+        if not await bot._universal_channel_check(update, context):
+            return
         # Create a fake callback query for the balance handler
         from telegram import CallbackQuery
         fake_query = type('FakeQuery', (), {
@@ -426,17 +535,47 @@ def main():
     
     application.add_handler(CommandHandler("balance", balance_command_wrapper))
     
-    # Admin pool commands
-    application.add_handler(CommandHandler("createpool", bot.admin_pool_handlers.handle_create_pool_command))
-    application.add_handler(CommandHandler("poolstats", bot.admin_pool_handlers.handle_pool_stats_command))
-    application.add_handler(CommandHandler("completepool", bot.admin_pool_handlers.handle_complete_pool_command))
-    application.add_handler(CommandHandler("cancelpool", bot.admin_pool_handlers.handle_cancel_pool_command))
-    application.add_handler(CommandHandler("poolrequests", bot.admin_pool_handlers.handle_requests_command))
+    # Admin pool commands with channel protection
+    async def create_pool_wrapper(update, context):
+        if not await bot._universal_channel_check(update, context):
+            return
+        await bot.admin_pool_handlers.handle_create_pool_command(update, context)
     
-    # Payment handlers
+    async def pool_stats_wrapper(update, context):
+        if not await bot._universal_channel_check(update, context):
+            return
+        await bot.admin_pool_handlers.handle_pool_stats_command(update, context)
+    
+    async def complete_pool_wrapper(update, context):
+        if not await bot._universal_channel_check(update, context):
+            return
+        await bot.admin_pool_handlers.handle_complete_pool_command(update, context)
+    
+    async def cancel_pool_wrapper(update, context):
+        if not await bot._universal_channel_check(update, context):
+            return
+        await bot.admin_pool_handlers.handle_cancel_pool_command(update, context)
+    
+    async def pool_requests_wrapper(update, context):
+        if not await bot._universal_channel_check(update, context):
+            return
+        await bot.admin_pool_handlers.handle_requests_command(update, context)
+    
+    application.add_handler(CommandHandler("createpool", create_pool_wrapper))
+    application.add_handler(CommandHandler("poolstats", pool_stats_wrapper))
+    application.add_handler(CommandHandler("completepool", complete_pool_wrapper))
+    application.add_handler(CommandHandler("cancelpool", cancel_pool_wrapper))
+    application.add_handler(CommandHandler("poolrequests", pool_requests_wrapper))
+    
+    # Payment handlers with channel protection
+    async def payment_wrapper(update, context):
+        if not await bot._universal_channel_check(update, context):
+            return
+        await bot.pool_handlers.handle_successful_payment(update, context)
+    
     from telegram.ext import PreCheckoutQueryHandler
-    application.add_handler(PreCheckoutQueryHandler(bot.pool_handlers.handle_successful_payment))
-    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, bot.pool_handlers.handle_successful_payment))
+    application.add_handler(PreCheckoutQueryHandler(payment_wrapper))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, payment_wrapper))
     
     application.add_handler(CallbackQueryHandler(bot.handle_callback_query))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_creator_search))

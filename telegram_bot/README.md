@@ -6,7 +6,7 @@ This is the Telegram bot component of FreeFans. It handles user interactions, co
 ## Directory Structure
 ```
 telegram_bot/
-├── bot.py                  # Main bot entry point
+├── main_bot.py             # Main bot entry point (renamed from bot.py)
 ├── coordinator_bot.py      # Coordinator bot (distributed mode)
 ├── worker_bot.py          # Worker bot (distributed mode)
 ├── requirements.txt        # Bot-specific dependencies
@@ -14,14 +14,19 @@ telegram_bot/
 ├── bot/                    # Bot handlers
 │   ├── pool_handlers.py    # Community pooling handlers
 │   ├── admin_pool_handlers.py # Admin pool management
+│   ├── channel_handlers.py # Channel membership management
+│   ├── channel_middleware.py # Channel membership middleware
 │   └── ...
 ├── core/                   # Core business logic
 ├── managers/               # Data managers
 │   ├── pool_manager.py     # Pool management with dynamic pricing
 │   ├── payment_manager.py  # Telegram Stars payment processing
+│   ├── channel_manager.py  # Channel membership management
 │   └── ...
 ├── scrapers/               # Web scraping
 ├── utils/                  # Utilities
+├── config/                 # Configuration files
+│   └── required_channels.json # Required channels configuration
 └── scripts/                # Management scripts
     └── setup_pools.py      # Initialize pooling system database
 ```
@@ -316,7 +321,7 @@ The bot includes a channel membership verification system. To require users to j
 
 ### Development
 ```bash
-python bot.py
+python main_bot.py
 ```
 
 ### Production (with systemd)
@@ -331,7 +336,7 @@ Type=simple
 User=your_user
 WorkingDirectory=/path/to/telegram_bot
 Environment="PATH=/path/to/telegram_bot/env/bin"
-ExecStart=/path/to/telegram_bot/env/bin/python bot.py
+ExecStart=/path/to/telegram_bot/env/bin/python main_bot.py
 Restart=always
 RestartSec=10
 
@@ -437,7 +442,7 @@ Logs are written to:
 View logs:
 ```bash
 # Development
-python bot.py
+python main_bot.py
 
 # Production (systemd)
 sudo journalctl -u freefans-bot -f

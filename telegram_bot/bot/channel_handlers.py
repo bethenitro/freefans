@@ -304,94 +304,125 @@ async def handle_channel_callback(update: Update, context: ContextTypes.DEFAULT_
         
     except Exception as e:
         logger.error(f"Error in channel callback: {e}")
-        await query.edit_message_text("❌ Error processing request.")
+        try:
+            if "message is not modified" in str(e).lower():
+                await query.answer("✅ No changes needed")
+            else:
+                await query.edit_message_text("❌ Error processing request.")
+        except Exception:
+            # If we can't edit the message, just answer the callback
+            await query.answer("❌ Error processing request")
 
 
 async def _handle_view_channels_callback(query, channel_manager):
     """Handle view channels callback."""
-    channels = channel_manager.get_required_channels()
-    
-    if not channels:
-        text = "📢 **Required Channels**\n\nNo channels configured."
-        keyboard = [[InlineKeyboardButton("⚙️ Settings", callback_data="channel_settings")]]
-    else:
-        text = f"📢 **Required Channels** ({len(channels)})\n\n"
+    try:
+        channels = channel_manager.get_required_channels()
         
-        for i, channel in enumerate(channels, 1):
-            channel_name = channel.get('channel_name', 'Unknown')
-            channel_id = channel.get('channel_id', 'Unknown')
-            text += f"**{i}. {channel_name}**\n"
-            text += f"🆔 `{channel_id}`\n\n"
+        if not channels:
+            text = "📢 **Required Channels**\n\nNo channels configured."
+            keyboard = [[InlineKeyboardButton("⚙️ Settings", callback_data="channel_settings")]]
+        else:
+            text = f"📢 **Required Channels** ({len(channels)})\n\n"
+            
+            for i, channel in enumerate(channels, 1):
+                channel_name = channel.get('channel_name', 'Unknown')
+                channel_id = channel.get('channel_id', 'Unknown')
+                text += f"**{i}. {channel_name}**\n"
+                text += f"🆔 `{channel_id}`\n\n"
+            
+            keyboard = [
+                [InlineKeyboardButton("⚙️ Settings", callback_data="channel_settings")],
+                [InlineKeyboardButton("🔄 Refresh", callback_data="view_required_channels")]
+            ]
         
-        keyboard = [
-            [InlineKeyboardButton("⚙️ Settings", callback_data="channel_settings")],
-            [InlineKeyboardButton("🔄 Refresh", callback_data="view_required_channels")]
-        ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            # Message content is the same, just answer the callback
+            await query.answer("✅ Already up to date")
+        else:
+            logger.error(f"Error in view channels callback: {e}")
+            await query.answer("❌ Error loading channels")
 
 
 async def _handle_settings_callback(query, channel_manager):
     """Handle settings callback."""
-    config = channel_manager._get_full_config()
-    
-    text = f"⚙️ **Channel Settings**\n\n"
-    
-    bypass_admins = config.get('bypass_for_admins', True)
-    bypass_workers = config.get('bypass_for_workers', False)
-    
-    text += f"👑 **Admin Bypass:** {'✅ Enabled' if bypass_admins else '❌ Disabled'}\n"
-    text += f"👷 **Worker Bypass:** {'✅ Enabled' if bypass_workers else '❌ Disabled'}\n\n"
-    
-    text += f"💡 Use buttons to toggle settings."
-    
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                f"👑 Admin Bypass: {'ON' if bypass_admins else 'OFF'}", 
-                callback_data=f"toggle_admin_bypass_{not bypass_admins}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                f"👷 Worker Bypass: {'ON' if bypass_workers else 'OFF'}", 
-                callback_data=f"toggle_worker_bypass_{not bypass_workers}"
-            )
-        ],
-        [InlineKeyboardButton("📋 View Channels", callback_data="view_required_channels")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    try:
+        config = channel_manager._get_full_config()
+        
+        text = f"⚙️ **Channel Settings**\n\n"
+        
+        bypass_admins = config.get('bypass_for_admins', True)
+        bypass_workers = config.get('bypass_for_workers', False)
+        
+        text += f"👑 **Admin Bypass:** {'✅ Enabled' if bypass_admins else '❌ Disabled'}\n"
+        text += f"👷 **Worker Bypass:** {'✅ Enabled' if bypass_workers else '❌ Disabled'}\n\n"
+        
+        text += f"💡 Use buttons to toggle settings."
+        
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    f"👑 Admin Bypass: {'ON' if bypass_admins else 'OFF'}", 
+                    callback_data=f"toggle_admin_bypass_{not bypass_admins}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"👷 Worker Bypass: {'ON' if bypass_workers else 'OFF'}", 
+                    callback_data=f"toggle_worker_bypass_{not bypass_workers}"
+                )
+            ],
+            [InlineKeyboardButton("📋 View Channels", callback_data="view_required_channels")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            # Message content is the same, just answer the callback
+            await query.answer("✅ Settings updated")
+        else:
+            logger.error(f"Error in settings callback: {e}")
+            await query.answer("❌ Error loading settings")
 
 
 async def _handle_toggle_admin_bypass(query, channel_manager, new_value):
     """Handle toggle admin bypass."""
-    success = channel_manager.update_settings(bypass_for_admins=new_value)
-    
-    if success:
-        status = "enabled" if new_value else "disabled"
-        await query.edit_message_text(
-            f"✅ **Admin Bypass {status.title()}**\n\n"
-            f"Admins {'can now' if new_value else 'must now'} {'bypass' if new_value else 'join'} required channels."
-        )
-    else:
-        await query.edit_message_text("❌ Failed to update setting.")
+    try:
+        success = channel_manager.update_settings(bypass_for_admins=new_value)
+        
+        if success:
+            # Return to settings menu with updated values
+            await _handle_settings_callback(query, channel_manager)
+        else:
+            await query.edit_message_text("❌ Failed to update setting.")
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            await query.answer("✅ Setting already updated")
+        else:
+            logger.error(f"Error toggling admin bypass: {e}")
+            await query.answer("❌ Error updating setting")
 
 
 async def _handle_toggle_worker_bypass(query, channel_manager, new_value):
     """Handle toggle worker bypass."""
-    success = channel_manager.update_settings(bypass_for_workers=new_value)
-    
-    if success:
-        status = "enabled" if new_value else "disabled"
-        await query.edit_message_text(
-            f"✅ **Worker Bypass {status.title()}**\n\n"
-            f"Workers {'can now' if new_value else 'must now'} {'bypass' if new_value else 'join'} required channels."
-        )
-    else:
-        await query.edit_message_text("❌ Failed to update setting.")
+    try:
+        success = channel_manager.update_settings(bypass_for_workers=new_value)
+        
+        if success:
+            # Return to settings menu with updated values
+            await _handle_settings_callback(query, channel_manager)
+        else:
+            await query.edit_message_text("❌ Failed to update setting.")
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            await query.answer("✅ Setting already updated")
+        else:
+            logger.error(f"Error toggling worker bypass: {e}")
+            await query.answer("❌ Error updating setting")
 
 
 async def _handle_edit_messages_callback(query):
