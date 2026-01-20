@@ -115,6 +115,8 @@ The bot includes a channel membership verification system that requires users to
 - `/channelsettings` - Configure channel membership settings
 - `/setwelcomemessage <text>` - Set custom welcome message
 - `/setmembershipmessage <text>` - Set custom membership check message
+- `/channeldiagnostics` - Diagnose channel configuration issues
+- `/testchannels <user_id>` - Test specific user's channel membership
 
 ### 🔧 **Sub-Admin Commands**
 

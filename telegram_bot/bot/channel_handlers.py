@@ -487,6 +487,130 @@ async def set_welcome_message_command(update: Update, context: ContextTypes.DEFA
         await update.message.reply_text("❌ Error updating message.")
 
 
+async def channel_diagnostics_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Diagnose channel configuration issues (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text("❌ This command is for admins only.")
+        return
+    
+    try:
+        channel_manager = get_channel_manager()
+        channels = channel_manager.get_required_channels()
+        
+        if not channels:
+            await update.message.reply_text("📢 No required channels configured.")
+            return
+        
+        message = "🔍 **Channel Diagnostics**\n\n"
+        
+        for i, channel in enumerate(channels, 1):
+            channel_id = channel.get('channel_id', 'Unknown')
+            channel_name = channel.get('channel_name', 'Unknown')
+            channel_link = channel.get('channel_link', 'No link')
+            
+            message += f"**{i}. {channel_name}**\n"
+            message += f"🆔 ID: `{channel_id}`\n"
+            message += f"🔗 Link: {channel_link}\n"
+            
+            # Test bot access
+            try:
+                chat = await context.bot.get_chat(channel_id)
+                message += f"✅ Channel found: {chat.title}\n"
+                
+                # Check bot status
+                try:
+                    bot_member = await context.bot.get_chat_member(channel_id, context.bot.id)
+                    if bot_member.status in ['administrator', 'creator']:
+                        message += f"✅ Bot is admin - can check memberships\n"
+                    else:
+                        message += f"❌ Bot is not admin - **ACTION REQUIRED**\n"
+                        message += f"💡 Add bot as admin to check memberships\n"
+                except Exception as e:
+                    message += f"❌ Cannot check bot status: {str(e)[:50]}...\n"
+                    message += f"💡 Bot may not be in the channel\n"
+                    
+            except Exception as e:
+                error_str = str(e)
+                if "chat not found" in error_str.lower():
+                    message += f"❌ Channel not found - invalid username\n"
+                elif "chat_admin_required" in error_str.lower():
+                    message += f"❌ Bot needs admin access\n"
+                else:
+                    message += f"❌ Error: {error_str[:50]}...\n"
+            
+            message += "\n"
+        
+        message += "🔧 **To Fix Issues:**\n"
+        message += "1. Go to each channel with ❌ status\n"
+        message += "2. Channel Settings → Administrators\n"
+        message += "3. Add your bot as administrator\n"
+        message += "4. Give 'Can see messages' permission\n"
+        message += "5. Test with `/channeldiagnostics` again\n\n"
+        message += "💡 Use `/testchannels` to test a specific user's membership"
+        
+        # Split message if too long
+        if len(message) > 4000:
+            parts = [message[i:i+4000] for i in range(0, len(message), 4000)]
+            for part in parts:
+                await update.message.reply_text(part, parse_mode='Markdown')
+        else:
+            await update.message.reply_text(message, parse_mode='Markdown')
+            
+    except Exception as e:
+        logger.error(f"Error in channel diagnostics: {e}")
+        await update.message.reply_text("❌ Error running diagnostics.")
+
+
+async def test_user_channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Test channel membership for a specific user (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text("❌ This command is for admins only.")
+        return
+    
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "❌ Usage: `/testchannels <user_id>`\n\n"
+            "Example: `/testchannels 123456789`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    try:
+        test_user_id = int(context.args[0])
+        channel_manager = get_channel_manager()
+        
+        # Check membership
+        is_member, missing_channels = await channel_manager.check_user_membership(test_user_id, context)
+        
+        message = f"🧪 **Channel Test for User {test_user_id}**\n\n"
+        
+        if is_member:
+            message += "✅ **User is member of all required channels!**\n"
+        else:
+            message += f"❌ **User is missing {len(missing_channels)} channels:**\n\n"
+            
+            for i, channel in enumerate(missing_channels, 1):
+                channel_name = channel.get('channel_name', 'Unknown')
+                channel_id = channel.get('channel_id', 'Unknown')
+                message += f"{i}. {channel_name} (`{channel_id}`)\n"
+        
+        message += f"\n💡 Use `/channeldiagnostics` to check bot permissions"
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+        
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID. Must be a number.")
+    except Exception as e:
+        logger.error(f"Error testing user channels: {e}")
+        await update.message.reply_text("❌ Error testing user channels.")
+
+
 async def set_membership_message_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set custom membership check message (admin only)."""
     user_id = update.effective_user.id

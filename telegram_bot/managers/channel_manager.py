@@ -85,10 +85,14 @@ class ChannelManager:
             return True, []  # No channels required
         
         missing_channels = []
+        bot_admin_issues = []
         
         for channel in self.required_channels:
             channel_id = channel.get('channel_id')
+            channel_name = channel.get('channel_name', 'Unknown Channel')
+            
             if not channel_id:
+                logger.warning(f"Channel configuration missing channel_id: {channel}")
                 continue
             
             try:
@@ -101,10 +105,46 @@ class ChannelManager:
                 elif member.status == 'restricted' and not member.can_send_messages:
                     missing_channels.append(channel)
                 
-            except (BadRequest, Forbidden, TelegramError) as e:
-                logger.warning(f"Could not check membership for channel {channel_id}: {e}")
-                # If we can't check, assume user is not a member
+            except BadRequest as e:
+                error_msg = str(e).lower()
+                if "chat not found" in error_msg:
+                    logger.error(f"❌ Channel {channel_id} ({channel_name}) not found - invalid channel")
+                    # Don't block user for invalid channels, but log the issue
+                    continue
+                elif "chat_admin_required" in error_msg:
+                    logger.error(f"❌ Bot is not admin in channel {channel_id} ({channel_name})")
+                    bot_admin_issues.append(channel)
+                    # For now, assume user is not a member if we can't check
+                    missing_channels.append(channel)
+                elif "user not found" in error_msg:
+                    logger.warning(f"User {user_id} not found when checking channel {channel_id}")
+                    # User doesn't exist, treat as not a member
+                    missing_channels.append(channel)
+                else:
+                    logger.warning(f"BadRequest checking membership for {channel_id}: {e}")
+                    # On unknown BadRequest, assume not a member
+                    missing_channels.append(channel)
+                    
+            except Forbidden as e:
+                logger.error(f"❌ Bot forbidden from accessing channel {channel_id} ({channel_name}): {e}")
+                bot_admin_issues.append(channel)
+                # Bot was removed or blocked, assume user not a member
                 missing_channels.append(channel)
+                
+            except TelegramError as e:
+                logger.warning(f"Telegram error checking membership for {channel_id} ({channel_name}): {e}")
+                # On other Telegram errors, assume not a member for safety
+                missing_channels.append(channel)
+                
+            except Exception as e:
+                logger.error(f"Unexpected error checking membership for {channel_id} ({channel_name}): {e}")
+                # On unexpected errors, assume not a member for safety
+                missing_channels.append(channel)
+        
+        # If there are bot admin issues, log them for admin attention
+        if bot_admin_issues:
+            admin_channels = [f"{ch.get('channel_name', 'Unknown')} ({ch.get('channel_id', 'Unknown')})" for ch in bot_admin_issues]
+            logger.error(f"🚨 ADMIN ACTION REQUIRED: Bot needs admin access to: {', '.join(admin_channels)}")
         
         return len(missing_channels) == 0, missing_channels
     

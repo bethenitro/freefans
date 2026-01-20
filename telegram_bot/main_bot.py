@@ -35,7 +35,8 @@ from bot.channel_handlers import (
     add_required_channel_command, remove_required_channel_command,
     list_required_channels_command, channel_settings_command,
     handle_channel_callback, set_welcome_message_command,
-    set_membership_message_command
+    set_membership_message_command, channel_diagnostics_command,
+    test_user_channels_command
 )
 from bot.channel_middleware import handle_check_membership_callback
 from managers.cache_factory import get_cache_manager
@@ -140,13 +141,13 @@ class FreeFansBot:
             # Check membership
             is_member, missing_channels = await channel_manager.check_user_membership(user_id, context)
             
-            if not is_member:
+            if not is_member and missing_channels:
                 # User is not member of all required channels - BLOCK EVERYTHING
                 message = "🚫 **Access Restricted**\n\n"
                 message += "You must join ALL required channels before using this bot.\n\n"
                 message += "**Required Channels:**\n"
                 
-                for i, channel in enumerate(missing_channels, 1):
+                for i, channel in enumerate(missing_channels[:10], 1):  # Limit to 10 channels
                     channel_name = channel.get('channel_name', 'Unknown Channel')
                     message += f"{i}. {channel_name}\n"
                 
@@ -156,8 +157,11 @@ class FreeFansBot:
                 keyboard = []
                 for channel in missing_channels[:5]:  # Limit to 5 buttons
                     channel_name = channel.get('channel_name', 'Join Channel')
-                    channel_link = channel.get('channel_link', '#')
-                    keyboard.append([InlineKeyboardButton(f"📢 Join {channel_name}", url=channel_link)])
+                    channel_link = channel.get('channel_link')
+                    
+                    # Only add button if we have a valid link
+                    if channel_link and channel_link != '#':
+                        keyboard.append([InlineKeyboardButton(f"📢 Join {channel_name}", url=channel_link)])
                 
                 # Add check membership button
                 keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_membership")])
@@ -165,13 +169,27 @@ class FreeFansBot:
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 # Send blocking message
-                if update.message:
-                    await update.message.reply_text(message, parse_mode='Markdown', reply_markup=reply_markup)
-                elif update.callback_query:
+                try:
+                    if update.message:
+                        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+                    elif update.callback_query:
+                        try:
+                            await update.callback_query.edit_message_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+                        except Exception as edit_error:
+                            # If edit fails, answer the callback and send new message
+                            await update.callback_query.answer("❌ You must join required channels first!")
+                            if update.callback_query.message:
+                                await update.callback_query.message.reply_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+                except Exception as send_error:
+                    logger.error(f"Error sending channel restriction message: {send_error}")
+                    # Fallback: try to send a simple message
                     try:
-                        await update.callback_query.edit_message_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+                        if update.message:
+                            await update.message.reply_text("❌ You must join required channels to use this bot. Send /start for details.")
+                        elif update.callback_query:
+                            await update.callback_query.answer("❌ You must join required channels first!")
                     except Exception:
-                        await update.callback_query.answer("❌ You must join required channels first!")
+                        pass  # If all fails, just block silently
                 
                 return False  # Block execution
                 
@@ -179,7 +197,8 @@ class FreeFansBot:
             
         except Exception as e:
             logger.error(f"Error in universal channel check: {e}")
-            return True  # On error, allow execution (fail open)
+            # On critical error, allow execution to prevent bot lockup
+            return True
 
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -510,6 +529,10 @@ def main():
     application.add_handler(CommandHandler("channelsettings", create_channel_protected_handler(channel_settings_command)))
     application.add_handler(CommandHandler("setwelcomemessage", create_channel_protected_handler(set_welcome_message_command)))
     application.add_handler(CommandHandler("setmembershipmessage", create_channel_protected_handler(set_membership_message_command)))
+    
+    # Channel diagnostic commands (admin only)
+    application.add_handler(CommandHandler("channeldiagnostics", create_channel_protected_handler(channel_diagnostics_command)))
+    application.add_handler(CommandHandler("testchannels", create_channel_protected_handler(test_user_channels_command)))
     
     # Pool commands with channel protection
     async def pools_command_wrapper(update, context):
