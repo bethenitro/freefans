@@ -4,7 +4,7 @@ A bot for accessing creator content with filtering capabilities
 """
 
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.error import TimedOut, NetworkError, BadRequest, RetryAfter
 from decouple import config
@@ -37,7 +37,7 @@ from bot.channel_handlers import (
     handle_channel_callback, set_welcome_message_command,
     set_membership_message_command
 )
-from bot.channel_middleware import require_channel_membership, handle_check_membership_callback
+from bot.channel_middleware import handle_check_membership_callback
 from managers.cache_factory import get_cache_manager
 from core.content_scraper import SimpleCityScraper
 
@@ -68,11 +68,57 @@ class FreeFansBot:
         # Initialize pool handlers
         self.pool_handlers = get_pool_handlers()
         self.admin_pool_handlers = get_admin_pool_handlers()
+    
+    async def _check_channel_membership(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """
+        Check if user is member of required channels.
+        Returns True if user can proceed, False if blocked by channel requirements.
+        """
+        try:
+            user_id = update.effective_user.id
+            from managers.channel_manager import get_channel_manager
+            channel_manager = get_channel_manager()
+            
+            # Check membership
+            is_member, missing_channels = await channel_manager.check_user_membership(user_id, context)
+            
+            if not is_member:
+                # User is not member of all required channels
+                message = channel_manager.get_membership_message(missing_channels)
+                
+                # Create join buttons
+                keyboard = []
+                for channel in missing_channels[:5]:  # Limit to 5 buttons
+                    channel_name = channel.get('channel_name', 'Join Channel')
+                    channel_link = channel.get('channel_link', '#')
+                    keyboard.append([InlineKeyboardButton(f"📢 Join {channel_name}", url=channel_link)])
+                
+                # Add check membership button
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_membership")])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                if update.message:
+                    await update.message.reply_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+                elif update.callback_query:
+                    await update.callback_query.edit_message_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+                
+                return False  # Block execution
+                
+            return True  # Allow execution
+            
+        except Exception as e:
+            logger.error(f"Error in channel membership check: {e}")
+            return True  # On error, allow execution (fail open)
 
     
-    @require_channel_membership
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send a message when the command /start is issued."""
+        # Check channel membership first
+        if not await self._check_channel_membership(update, context):
+            return  # User blocked by channel requirements
+        
+        # User is member of all required channels, execute start command
         await start_command(update, context, self)
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -118,9 +164,12 @@ class FreeFansBot:
             logger.error(f"Error showing cache stats: {e}")
             await update.message.reply_text("❌ Failed to retrieve cache statistics.")
 
-    @require_channel_membership
     async def handle_creator_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle creator name input and search for content."""
+        # Check channel membership first
+        if not await self._check_channel_membership(update, context):
+            return  # User blocked by channel requirements
+        
         # Check if this is admin setup password first
         from bot.admin_handlers import handle_admin_setup_password
         if await handle_admin_setup_password(update, context, self):
