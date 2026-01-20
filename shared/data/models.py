@@ -4,7 +4,7 @@ Mirrors the existing SQLite schema for seamless dual storage
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Index, Float, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, Boolean, Index, Float, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from shared.config.database import Base
@@ -145,7 +145,7 @@ class UserProfile(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     # User identification
-    user_id = Column(Integer, nullable=False, unique=True, index=True)  # Telegram user ID
+    user_id = Column(BigInteger, nullable=False, unique=True, index=True)  # Telegram user ID
     username = Column(String(255), nullable=True)  # Telegram username
     
     # Payment data
@@ -207,7 +207,7 @@ class ContentPool(Base):
     
     # Pool metadata
     request_id = Column(String(50), nullable=True, index=True)  # Related request ID from CSV
-    created_by = Column(Integer, nullable=False, index=True)  # User ID who created the pool
+    created_by = Column(BigInteger, nullable=False, index=True)  # User ID who created the pool
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
@@ -247,7 +247,7 @@ class PoolContribution(Base):
     contribution_id = Column(String(50), nullable=False, unique=True, index=True)
     
     # Relationships
-    user_id = Column(Integer, nullable=False, index=True)  # Telegram user ID
+    user_id = Column(BigInteger, nullable=False, index=True)  # Telegram user ID
     pool_id = Column(String(50), ForeignKey('content_pools.pool_id'), nullable=False, index=True)
     
     # Contribution details
@@ -288,7 +288,7 @@ class Transaction(Base):
     transaction_id = Column(String(50), nullable=False, unique=True, index=True)
     
     # Transaction details
-    user_id = Column(Integer, nullable=False, index=True)  # Telegram user ID
+    user_id = Column(BigInteger, nullable=False, index=True)  # Telegram user ID
     transaction_type = Column(String(50), nullable=False)  # 'pool_contribution', 'subscription', 'refund'
     amount = Column(Integer, nullable=False)  # Amount in Telegram Stars
     

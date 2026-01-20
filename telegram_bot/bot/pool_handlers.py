@@ -45,17 +45,6 @@ class PoolHandlers:
 
 No active pools right now! 
 
-💡 **How it works:**
-• Users request content that's not available yet
-• Multiple users contribute small amounts (Stars)
-• Once the target is reached, content is unlocked for everyone
-• The more contributors, the cheaper it is per person!
-
-**What you can do:**
-• Use `📝 Request Creator` or `🎯 Request Content` buttons to make requests
-• Admins can create pools from requests using `/createpool`
-• Check back later for new pools!
-
 💰 Use `/balance` to check your Stars balance
 """
                 await update.message.reply_text(text, parse_mode='Markdown')
