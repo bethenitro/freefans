@@ -27,6 +27,9 @@ from bot.admin_handlers import (
 from bot.worker_handlers import (
     handle_worker_reply, worker_stats_command, worker_help_command
 )
+# Import pool handlers
+from bot.pool_handlers import get_pool_handlers
+from bot.admin_pool_handlers import get_admin_pool_handlers
 from managers.cache_factory import get_cache_manager
 from core.content_scraper import SimpleCityScraper
 
@@ -53,6 +56,10 @@ class FreeFansBot:
         self.cache_manager = cache_manager or get_cache_manager()
         self.content_manager = ContentManager(self.cache_manager)
         self.user_sessions = {}
+        
+        # Initialize pool handlers
+        self.pool_handlers = get_pool_handlers()
+        self.admin_pool_handlers = get_admin_pool_handlers()
 
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -109,6 +116,10 @@ class FreeFansBot:
         if await handle_admin_setup_password(update, context, self):
             return
         
+        # Check if this is a pool custom amount message
+        if await self.pool_handlers.handle_custom_amount_message(update, context):
+            return
+        
         # Check if this is a worker reply to a video first
         if await handle_worker_reply(update, context, self):
             return
@@ -150,7 +161,23 @@ class FreeFansBot:
 
     async def handle_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle callback queries from inline keyboards."""
-        await handle_callback_query(update, context, self)
+        query = update.callback_query
+        data = query.data
+        
+        # Route pool-related callbacks to pool handlers
+        if (data.startswith("view_pool_") or data.startswith("contribute_") or 
+            data.startswith("custom_contribute_") or data == "my_balance" or 
+            data == "my_contributions" or data.startswith("buy_stars_") or 
+            data == "back_to_pools" or data == "buy_stars_menu" or
+            data.startswith("join_pool_")):
+            await self.pool_handlers.handle_pool_callback(update, context)
+        # Route admin pool callbacks
+        elif (data == "admin_pool_stats" or data == "admin_view_pools" or 
+              data == "admin_cleanup_pools"):
+            await self.admin_pool_handlers.handle_admin_callback(update, context)
+        else:
+            # Route to existing callback handler
+            await handle_callback_query(update, context, self)
     
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle errors caused by Updates."""
@@ -306,6 +333,35 @@ def main():
     # Worker commands
     application.add_handler(CommandHandler("mystats", worker_stats_command))
     application.add_handler(CommandHandler("workerhelp", worker_help_command))
+    
+    # Pool commands
+    application.add_handler(CommandHandler("pools", bot.pool_handlers.handle_pools_command))
+    
+    # Create a wrapper for balance command
+    async def balance_command_wrapper(update, context):
+        # Create a fake callback query for the balance handler
+        from telegram import CallbackQuery
+        fake_query = type('FakeQuery', (), {
+            'from_user': update.effective_user,
+            'message': update.message,
+            'edit_message_text': update.message.reply_text,
+            'answer': lambda: None
+        })()
+        await bot.pool_handlers._handle_my_balance(fake_query)
+    
+    application.add_handler(CommandHandler("balance", balance_command_wrapper))
+    
+    # Admin pool commands
+    application.add_handler(CommandHandler("createpool", bot.admin_pool_handlers.handle_create_pool_command))
+    application.add_handler(CommandHandler("poolstats", bot.admin_pool_handlers.handle_pool_stats_command))
+    application.add_handler(CommandHandler("completepool", bot.admin_pool_handlers.handle_complete_pool_command))
+    application.add_handler(CommandHandler("cancelpool", bot.admin_pool_handlers.handle_cancel_pool_command))
+    application.add_handler(CommandHandler("poolrequests", bot.admin_pool_handlers.handle_requests_command))
+    
+    # Payment handlers
+    from telegram.ext import PreCheckoutQueryHandler
+    application.add_handler(PreCheckoutQueryHandler(bot.pool_handlers.handle_successful_payment))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, bot.pool_handlers.handle_successful_payment))
     
     application.add_handler(CallbackQueryHandler(bot.handle_callback_query))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_creator_search))
