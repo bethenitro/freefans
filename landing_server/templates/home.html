@@ -1,41 +1,353 @@
 {% extends "base.html" %}
 
-{% block title %}FreeFans{% endblock %}
+{% block title %}FreeFans - Premium Content Platform{% endblock %}
+{% block description %}Discover premium content with FreeFans - Your gateway to exclusive creator content{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-lg-6 col-md-8">
-        <div class="content-card p-5 text-center">
-            <h1 class="mb-4">
-                <i class="fas fa-star"></i> FreeFans
-            </h1>
-            <p class="lead mb-4">
-                Discover premium content with style
-            </p>
+<div class="row justify-content-center min-vh-100 align-items-center">
+    <div class="col-xl-7 col-lg-8 col-md-10 col-sm-11">
+        <div class="content-card text-center fade-in compact-card">
+            <!-- Hero Section -->
+            <div class="hero-section-compact mb-4">
+                <div class="hero-icon-compact mb-3">
+                    <i class="fas fa-star icon-xl text-primary"></i>
+                </div>
+                <h1 class="hero-title-compact mb-3">
+                    <span class="gradient-text">FreeFans</span>
+                </h1>
+                <p class="lead-compact mb-4">
+                    Premium content with style and elegance
+                </p>
+            </div>
 
-            <div class="row mb-4">
+            <!-- Compact Features -->
+            <div class="row g-4 mb-4">
                 <div class="col-6">
-                    <div class="stats-item">
-                        <div class="stats-number text-success">
-                            <i class="fas fa-heart"></i>
-                        </div>
-                        <div class="stats-label">Premium Content</div>
+                    <div class="feature-compact">
+                        <i class="fas fa-heart text-success mb-3"></i>
+                        <div class="feature-label">Premium Content</div>
                     </div>
                 </div>
                 <div class="col-6">
-                    <div class="stats-item">
-                        <div class="stats-number text-primary">
-                            <i class="fas fa-shield-alt"></i>
-                        </div>
-                        <div class="stats-label">Secure Access</div>
+                    <div class="feature-compact">
+                        <i class="fas fa-shield-alt text-primary mb-3"></i>
+                        <div class="feature-label">Secure Access</div>
                     </div>
                 </div>
             </div>
 
-            <p class="text-secondary mb-4">
-                Experience content like never before
-            </p>
+            <!-- Call to Action -->
+            <div class="cta-compact">
+                <a href="#explore" class="access-btn-compact mb-3">
+                    <i class="fas fa-rocket me-2"></i>
+                    Get Started
+                </a>
+                <p class="cta-text-compact">
+                    <i class="fas fa-sparkles me-1"></i>
+                    Experience content like never before
+                </p>
+            </div>
         </div>
     </div>
 </div>
+
+<style>
+/* Compact mobile-friendly styles */
+.compact-card {
+    padding: 3rem 2.5rem !important;
+    margin: 1rem auto !important;
+    min-height: auto !important;
+    max-width: none !important;
+}
+
+.hero-section-compact {
+    padding: 1rem 0;
+}
+
+.hero-icon-compact {
+    position: relative;
+    display: inline-block;
+}
+
+.hero-icon-compact::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 120px;
+    height: 120px;
+    background: radial-gradient(circle, rgba(79, 70, 229, 0.2) 0%, transparent 70%);
+    border-radius: 50%;
+    animation: pulse-compact 2s ease-in-out infinite;
+}
+
+@keyframes pulse-compact {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.7; }
+    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.4; }
+}
+
+.hero-title-compact {
+    font-size: clamp(2.5rem, 6vw, 3.5rem) !important;
+    margin-bottom: 1rem !important;
+    line-height: 1.2;
+}
+
+.lead-compact {
+    font-size: clamp(1.125rem, 3vw, 1.375rem) !important;
+    margin-bottom: 1.5rem !important;
+    color: var(--text-secondary);
+}
+
+.feature-compact {
+    text-align: center;
+    padding: 2rem 1rem;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: var(--radius-xl);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: all var(--transition-normal);
+    height: 100%;
+}
+
+.feature-compact:hover {
+    transform: translateY(-4px);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(79, 70, 229, 0.2);
+    box-shadow: var(--shadow-lg);
+}
+
+.feature-compact i {
+    font-size: 2.5rem;
+    display: block;
+}
+
+.feature-label {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cta-compact {
+    padding: 2rem 0 1rem;
+}
+
+.access-btn-compact {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    border: none;
+    border-radius: var(--radius-full);
+    padding: 1.25rem 3rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: white;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    transition: all var(--transition-normal);
+    box-shadow: 0 6px 20px rgba(79, 70, 229, 0.3);
+    min-width: 220px;
+}
+
+.access-btn-compact:hover {
+    transform: translateY(-3px) scale(1.02);
+    box-shadow: 0 10px 30px rgba(79, 70, 229, 0.4);
+    color: white;
+    text-decoration: none;
+}
+
+.cta-text-compact {
+    font-size: 1rem;
+    color: var(--text-muted);
+    margin: 0;
+    font-weight: 500;
+}
+
+/* Desktop optimizations */
+@media (min-width: 1200px) {
+    .compact-card {
+        padding: 4rem 3rem !important;
+    }
+    
+    .hero-title-compact {
+        font-size: 3.5rem !important;
+    }
+    
+    .lead-compact {
+        font-size: 1.375rem !important;
+    }
+    
+    .feature-compact {
+        padding: 2.5rem 1.5rem;
+    }
+    
+    .feature-compact i {
+        font-size: 3rem;
+    }
+    
+    .feature-label {
+        font-size: 1.125rem;
+    }
+    
+    .access-btn-compact {
+        padding: 1.5rem 3.5rem;
+        font-size: 1.375rem;
+        min-width: 250px;
+    }
+    
+    .cta-text-compact {
+        font-size: 1.125rem;
+    }
+}
+
+@media (min-width: 992px) and (max-width: 1199px) {
+    .compact-card {
+        padding: 3.5rem 2.75rem !important;
+    }
+    
+    .hero-title-compact {
+        font-size: 3rem !important;
+    }
+    
+    .lead-compact {
+        font-size: 1.25rem !important;
+    }
+    
+    .feature-compact {
+        padding: 2.25rem 1.25rem;
+    }
+    
+    .feature-compact i {
+        font-size: 2.75rem;
+    }
+    
+    .feature-label {
+        font-size: 1.0625rem;
+    }
+    
+    .access-btn-compact {
+        padding: 1.375rem 3.25rem;
+        font-size: 1.3125rem;
+        min-width: 235px;
+    }
+    
+    .cta-text-compact {
+        font-size: 1.0625rem;
+    }
+}
+
+/* Tablet optimizations */
+@media (max-width: 991px) and (min-width: 769px) {
+    .compact-card {
+        padding: 2.5rem 2rem !important;
+    }
+    
+    .feature-compact {
+        padding: 1.75rem 1rem;
+    }
+    
+    .feature-compact i {
+        font-size: 2.25rem;
+    }
+    
+    .access-btn-compact {
+        padding: 1.125rem 2.5rem;
+        font-size: 1.125rem;
+        min-width: 200px;
+    }
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .compact-card {
+        padding: 2rem 1.5rem !important;
+        margin: 0.5rem !important;
+    }
+    
+    .hero-section-compact {
+        padding: 0.5rem 0;
+    }
+    
+    .hero-title-compact {
+        font-size: 2.5rem !important;
+    }
+    
+    .lead-compact {
+        font-size: 1.125rem !important;
+    }
+    
+    .access-btn-compact {
+        width: 100%;
+        max-width: 280px;
+        padding: 1rem 2rem;
+        font-size: 1rem;
+    }
+    
+    .feature-compact {
+        padding: 1.5rem 0.75rem;
+    }
+    
+    .feature-compact i {
+        font-size: 2rem;
+        margin-bottom: 1rem !important;
+    }
+    
+    .feature-label {
+        font-size: 0.875rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .compact-card {
+        padding: 1.5rem 1rem !important;
+        margin: 0.25rem !important;
+    }
+    
+    .hero-title-compact {
+        font-size: 2rem !important;
+    }
+    
+    .lead-compact {
+        font-size: 1rem !important;
+    }
+    
+    .feature-compact {
+        padding: 1.25rem 0.5rem;
+    }
+    
+    .feature-compact i {
+        font-size: 1.75rem;
+    }
+    
+    .feature-label {
+        font-size: 0.8125rem;
+    }
+}
+
+/* Ensure proper centering without breaking other pages */
+.min-vh-100 {
+    min-height: 100vh;
+}
+
+@media (max-height: 600px) {
+    .min-vh-100 {
+        min-height: auto;
+    }
+    
+    .compact-card {
+        padding: 1.5rem !important;
+        margin: 1rem auto !important;
+    }
+    
+    .hero-section-compact {
+        padding: 0.5rem 0;
+    }
+    
+    .cta-compact {
+        padding: 1rem 0 0.5rem;
+    }
+}
+</style>
 {% endblock %}

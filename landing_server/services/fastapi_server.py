@@ -256,6 +256,70 @@ async def access_content(encoded_data: str, signature: str):
     """Legacy access endpoint - deprecated"""
     raise HTTPException(status_code=404, detail="This link format is deprecated.")
 
+@app.get("/test")
+async def test_index(request: Request):
+    """Test index page showing all available test pages"""
+    return templates.TemplateResponse("test_index.html", {"request": request})
+
+@app.get("/test/image")
+async def test_image_content(request: Request):
+    """Test page for image content with placeholder data"""
+    return templates.TemplateResponse("content_landing.html", {
+        "request": request,
+        "creator_name": "SampleCreator",
+        "content_title": "Beautiful Sunset Photography Collection",
+        "content_type": "📷 Photo Gallery",
+        "is_video": False,
+        "is_photo": True,
+        "preview_url": "/static/test-image-preview.jpg",
+        "thumbnail_url": "/static/test-image-preview.jpg",
+        "original_url": "https://example.com/original-content",
+        "og_image": "/static/test-image-preview.jpg",
+        "og_title": "Beautiful Sunset Photography Collection - SampleCreator",
+        "og_description": "View Photo Gallery from SampleCreator"
+    })
+
+@app.get("/test/video")
+async def test_video_content(request: Request):
+    """Test page for video content with placeholder data"""
+    return templates.TemplateResponse("content_landing.html", {
+        "request": request,
+        "creator_name": "VideoCreator",
+        "content_title": "Exclusive Behind the Scenes Content",
+        "content_type": "🎬 Video",
+        "is_video": True,
+        "is_photo": False,
+        "preview_url": "/static/test-video-preview.jpg",
+        "thumbnail_url": "/static/test-video-preview.jpg",
+        "original_url": "https://example.com/original-video",
+        "og_image": "/static/test-video-preview.jpg",
+        "og_title": "Exclusive Behind the Scenes Content - VideoCreator",
+        "og_description": "View Video from VideoCreator"
+    })
+
+@app.get("/test/no-preview")
+async def test_no_preview_content(request: Request):
+    """Test page for content without preview"""
+    return templates.TemplateResponse("content_landing.html", {
+        "request": request,
+        "creator_name": "MysteryCreator",
+        "content_title": "Exclusive Premium Content",
+        "content_type": "🔒 Premium",
+        "is_video": False,
+        "is_photo": False,
+        "preview_url": None,
+        "thumbnail_url": None,
+        "original_url": "https://example.com/premium-content",
+        "og_image": "",
+        "og_title": "Exclusive Premium Content - MysteryCreator",
+        "og_description": "View Premium content from MysteryCreator"
+    })
+
+@app.get("/test/home")
+async def test_home_page(request: Request):
+    """Test home page"""
+    return templates.TemplateResponse("home.html", {"request": request})
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint with detailed status"""

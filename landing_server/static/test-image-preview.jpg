@@ -1,0 +1,59 @@
+<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sunset" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff6b6b;stop-opacity:1" />
+      <stop offset="30%" style="stop-color:#ffa726;stop-opacity:1" />
+      <stop offset="70%" style="stop-color:#ffcc02;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff8a65;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="ground" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2e7d32;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1b5e20;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Sky -->
+  <rect width="800" height="400" fill="url(#sunset)"/>
+  
+  <!-- Ground -->
+  <rect y="400" width="800" height="200" fill="url(#ground)"/>
+  
+  <!-- Sun -->
+  <circle cx="650" cy="150" r="60" fill="#fff59d" opacity="0.9"/>
+  <circle cx="650" cy="150" r="45" fill="#ffeb3b"/>
+  
+  <!-- Mountains -->
+  <polygon points="0,400 200,200 400,300 600,150 800,250 800,400" fill="#424242" opacity="0.7"/>
+  <polygon points="100,400 300,180 500,280 700,120 800,200 800,400" fill="#616161" opacity="0.5"/>
+  
+  <!-- Trees -->
+  <ellipse cx="150" cy="380" rx="30" ry="50" fill="#2e7d32"/>
+  <rect x="145" y="380" width="10" height="40" fill="#5d4037"/>
+  
+  <ellipse cx="300" cy="370" rx="25" ry="40" fill="#388e3c"/>
+  <rect x="297" y="370" width="8" height="35" fill="#5d4037"/>
+  
+  <ellipse cx="500" cy="385" rx="35" ry="55" fill="#2e7d32"/>
+  <rect x="495" y="385" width="12" height="45" fill="#5d4037"/>
+  
+  <!-- Clouds -->
+  <ellipse cx="200" cy="80" rx="40" ry="20" fill="white" opacity="0.6"/>
+  <ellipse cx="220" cy="75" rx="35" ry="18" fill="white" opacity="0.6"/>
+  <ellipse cx="180" cy="75" rx="30" ry="15" fill="white" opacity="0.6"/>
+  
+  <ellipse cx="500" cy="60" rx="50" ry="25" fill="white" opacity="0.4"/>
+  <ellipse cx="525" cy="55" rx="40" ry="20" fill="white" opacity="0.4"/>
+  
+  <!-- Photo overlay -->
+  <rect width="800" height="600" fill="none" stroke="#ffffff" stroke-width="8" opacity="0.1"/>
+  
+  <!-- Camera icon -->
+  <g transform="translate(20, 20)" fill="white" opacity="0.3">
+    <rect x="0" y="8" width="40" height="24" rx="4" fill="none" stroke="white" stroke-width="2"/>
+    <circle cx="20" cy="20" r="6" fill="none" stroke="white" stroke-width="2"/>
+    <rect x="32" y="4" width="8" height="8" rx="2"/>
+  </g>
+  
+  <!-- Title -->
+  <text x="400" y="550" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="24" font-weight="bold" opacity="0.8">Beautiful Sunset Photography</text>
+</svg>
