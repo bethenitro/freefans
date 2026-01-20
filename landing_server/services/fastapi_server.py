@@ -26,11 +26,11 @@ import uvicorn
 from decouple import config
 
 # Add project root to path for shared imports
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import video preview extractor
-from landing_server.services.video_preview_extractor import video_preview_extractor
+from services.video_preview_extractor import video_preview_extractor
 
 # Initialize logger with timestamp format
 logging.basicConfig(
@@ -96,7 +96,7 @@ async def startup_event():
 async def shutdown_event():
     """Clean up resources on shutdown"""
     try:
-        from landing_server.services.image_cache_service import video_preview_cache_service
+        from services.image_cache_service import video_preview_cache_service
         await video_preview_cache_service.stop()
         print("✅ Video preview cache service stopped")
     except Exception as e:
@@ -405,7 +405,7 @@ async def _background_cache_and_store(short_id: str, content_data: ContentLink, 
             try:
                 logger.info(f"💾 Background: Caching preview image for {short_id}")
                 cache_start = time.time()
-                from landing_server.services.image_cache_service import video_preview_cache_service
+                from services.image_cache_service import video_preview_cache_service
                 # Use asyncio.wait_for to add timeout protection
                 cached_path = await asyncio.wait_for(
                     video_preview_cache_service.cache_video_preview(preview_url_to_store),
@@ -588,7 +588,7 @@ async def generate_batch_landing_links(content_items: List[ContentLink]):
         logger.info(f"ℹ️ No video tasks to dispatch (all {len(results)} items are images or other content)")
     
     try:
-        from landing_server.services.celery_tasks import cache_and_store_task
+        from services.celery_tasks import cache_and_store_task
         
         for item in video_items:
             # Convert content_data to dict for Celery serialization
@@ -690,7 +690,7 @@ async def extract_video_preview(request: Request):
 async def _cache_preview_in_background(preview_url: str):
     """Background task to cache a video preview image"""
     try:
-        from landing_server.services.image_cache_service import video_preview_cache_service
+        from services.image_cache_service import video_preview_cache_service
         cached_path = await video_preview_cache_service.cache_video_preview(preview_url)
         if cached_path:
             logger.info(f"✅ Cached video preview in background: {cached_path}")

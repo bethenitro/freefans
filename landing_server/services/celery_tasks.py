@@ -10,10 +10,10 @@ from typing import Optional
 from decouple import config
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from landing_server.services.celery_app import celery_app
+from services.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def cache_and_store_task(self, short_id: str, content_data: dict, expires_at: st
                 cache_start = time.time()
                 
                 # Import here to avoid circular imports
-                from landing_server.services.image_cache_service import video_preview_cache_service
+                from services.image_cache_service import video_preview_cache_service
                 
                 # Run async function in sync context
                 loop = asyncio.new_event_loop()

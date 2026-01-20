@@ -14,7 +14,7 @@ import sys
 from decouple import config
 
 # Add project root to path for shared imports
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from shared.config.database import get_db_session_sync
