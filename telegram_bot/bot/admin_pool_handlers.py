@@ -75,6 +75,11 @@ class AdminPoolHandlers:
                 request_id = context.args[1]
                 total_cost = int(context.args[2])
                 
+                # Validate total cost FIRST
+                if total_cost < 10 or total_cost > 1000:
+                    await update.message.reply_text("❌ Total cost must be between 10 and 1000 Stars.")
+                    return
+                
                 pool_id = self.pool_manager.create_pool_from_request(
                     request_id=request_id,
                     total_cost=total_cost,
@@ -91,9 +96,21 @@ class AdminPoolHandlers:
                     text += f"💰 **Total Cost:** {total_cost} ⭐\n"
                     text += f"💫 **Starting Price:** {pool['current_price_per_user']} ⭐ per person\n\n"
                     text += f"💡 Price decreases as more people join (max {pool['max_contributors']} contributors)!"
+                    
+                    text += f"\n⏰ **Expires:** {(datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')}\n\n"
+                    text += f"Users can now join this pool using `/pools`!"
+                    
+                    # Add quick action buttons
+                    keyboard = [
+                        [InlineKeyboardButton("🔍 View Pool", callback_data=f"view_pool_{pool_id}")],
+                        [InlineKeyboardButton("📊 Pool Stats", callback_data="admin_pool_stats")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
                 else:
                     await update.message.reply_text("❌ Failed to create pool from request. Check request ID.")
-                    return
+                return
             
             elif mode == 'manual':
                 # Create pool manually
@@ -111,6 +128,11 @@ class AdminPoolHandlers:
                 valid_types = ['photo_set', 'video', 'live_stream']
                 if content_type not in valid_types:
                     await update.message.reply_text(f"❌ Invalid content type. Use: {', '.join(valid_types)}")
+                    return
+                
+                # Validate total cost FIRST
+                if total_cost < 10 or total_cost > 1000:
+                    await update.message.reply_text("❌ Total cost must be between 10 and 1000 Stars.")
                     return
                 
                 # Create the pool
@@ -135,30 +157,25 @@ class AdminPoolHandlers:
                     
                     if content_description:
                         text += f"📄 **Description:** {content_description}\n"
+                    
+                    text += f"\n⏰ **Expires:** {(datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')}\n\n"
+                    text += f"Users can now join this pool using `/pools`!"
+                    
+                    # Add quick action buttons
+                    keyboard = [
+                        [InlineKeyboardButton("🔍 View Pool", callback_data=f"view_pool_{pool_id}")],
+                        [InlineKeyboardButton("📊 Pool Stats", callback_data="admin_pool_stats")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
                 else:
                     await update.message.reply_text("❌ Failed to create pool. Please check the parameters.")
-                    return
+                return
             
             else:
                 await update.message.reply_text("❌ Invalid mode. Use 'request' or 'manual'.")
                 return
-            
-            # Validate total cost
-            if total_cost < 10 or total_cost > 1000:
-                await update.message.reply_text("❌ Total cost must be between 10 and 1000 Stars.")
-                return
-            
-            text += f"\n⏰ **Expires:** {(datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')}\n\n"
-            text += f"Users can now join this pool using `/pools`!"
-            
-            # Add quick action buttons
-            keyboard = [
-                [InlineKeyboardButton("🔍 View Pool", callback_data=f"view_pool_{pool_id}")],
-                [InlineKeyboardButton("📊 Pool Stats", callback_data="admin_pool_stats")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
                 
         except ValueError:
             await update.message.reply_text("❌ Invalid total cost. Please enter a number.")
@@ -202,6 +219,11 @@ class AdminPoolHandlers:
                 if stats['total_pools'] > 0:
                     success_rate = (stats['completed_pools'] / stats['total_pools']) * 100
                     text += f"\n📈 **Success Rate:** {success_rate:.1f}%"
+                else:
+                    text += f"\n💡 **Getting Started:**\n"
+                    text += f"• Use `/poolrequests` to view pending requests\n"
+                    text += f"• Create pools with `/createpool request <id> <cost>`\n"
+                    text += f"• Users can make requests via bot menu buttons"
                 
                 # Add management buttons
                 keyboard = [
@@ -233,7 +255,20 @@ class AdminPoolHandlers:
             requests = self.pool_manager.get_pending_requests()
             
             if not requests:
-                text = "📋 **Pending Requests**\n\nNo pending requests found."
+                text = """
+📋 **Pending Requests**
+
+No pending requests found.
+
+💡 **How to get requests:**
+• Users can make requests using `📝 Request Creator` or `🎯 Request Content` buttons
+• Requests appear here when users submit them
+• You can then create pools from these requests
+
+**Commands:**
+• `/poolstats` - View pool system statistics
+• `/createpool manual <creator> <title> <type> <cost>` - Create manual pool
+"""
                 await update.message.reply_text(text, parse_mode='Markdown')
                 return
             
@@ -309,7 +344,7 @@ Usage: `/completepool <pool_id> <content_url>`
                 text += f"🆔 **Pool ID:** `{pool_id}`\n"
                 text += f"👤 **Creator:** {pool['creator_name']}\n"
                 text += f"📝 **Title:** {pool['content_title']}\n"
-                text += f"💰 **Final Amount:** {pool['current_amount']}/{pool['target_amount']} ⭐\n"
+                text += f"💰 **Final Amount:** {pool['current_amount']}/{pool['total_cost']} ⭐\n"
                 text += f"👥 **Contributors:** {pool['contributors_count']}\n"
                 text += f"🔗 **Content URL:** {content_url}\n\n"
                 text += f"🎉 All contributors now have access to the content!"
@@ -373,7 +408,7 @@ Usage: `/cancelpool <pool_id> [reason]`
                 text += f"🆔 **Pool ID:** `{pool_id}`\n"
                 text += f"👤 **Creator:** {pool['creator_name']}\n"
                 text += f"📝 **Title:** {pool['content_title']}\n"
-                text += f"💰 **Amount:** {pool['current_amount']}/{pool['target_amount']} ⭐\n"
+                text += f"💰 **Amount:** {pool['current_amount']}/{pool['total_cost']} ⭐\n"
                 text += f"👥 **Contributors:** {pool['contributors_count']}\n"
                 text += f"📝 **Reason:** {reason}\n\n"
                 text += f"💸 All contributors will be refunded automatically."
@@ -458,7 +493,7 @@ Usage: `/cancelpool <pool_id> [reason]`
                     progress = pool['completion_percentage']
                     text += f"**{i}. {pool['creator_name']}**\n"
                     text += f"📝 {pool['content_title']}\n"
-                    text += f"💰 {pool['current_amount']}/{pool['target_amount']} ⭐ ({progress:.1f}%)\n"
+                    text += f"💰 {pool['current_amount']}/{pool['total_cost']} ⭐ ({progress:.1f}%)\n"
                     text += f"👥 {pool['contributors_count']} contributors\n\n"
                     
                     keyboard.append([InlineKeyboardButton(

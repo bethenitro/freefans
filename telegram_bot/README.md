@@ -1,21 +1,166 @@
 # Telegram Bot Service
 
 ## Overview
-This is the Telegram bot component of FreeFans. It handles user interactions, content search, admin/worker management, and communicates with the landing server for content delivery.
+This is the Telegram bot component of FreeFans. It handles user interactions, content search, admin/worker management, community pooling system with dynamic pricing, and communicates with the landing server for content delivery.
 
 ## Directory Structure
 ```
 telegram_bot/
 ├── bot.py                  # Main bot entry point
+├── coordinator_bot.py      # Coordinator bot (distributed mode)
+├── worker_bot.py          # Worker bot (distributed mode)
 ├── requirements.txt        # Bot-specific dependencies
 ├── .env                    # Environment variables (bot token, etc.)
 ├── bot/                    # Bot handlers
+│   ├── pool_handlers.py    # Community pooling handlers
+│   ├── admin_pool_handlers.py # Admin pool management
+│   └── ...
 ├── core/                   # Core business logic
 ├── managers/               # Data managers
+│   ├── pool_manager.py     # Pool management with dynamic pricing
+│   ├── payment_manager.py  # Telegram Stars payment processing
+│   └── ...
 ├── scrapers/               # Web scraping
 ├── utils/                  # Utilities
 └── scripts/                # Management scripts
+    └── setup_pools.py      # Initialize pooling system database
 ```
+
+## Bot Commands
+
+### 🔍 **User Commands (Everyone)**
+
+#### Basic Navigation
+- `/start` - Start the bot and show welcome message
+- `/help` - Show help information and available commands
+- `/cancel` - Cancel current operation
+
+#### Content & Search
+- `/pools` - View active community pools with dynamic pricing
+- `/balance` - Check your Telegram Stars balance and transaction history
+- `🔍 Search Creator` - Search for a specific creator's content (menu button)
+- `🎲 Random Creator` - Get a random creator with lots of content (menu button)
+- `🏊‍♀️ Community Pools` - Browse and join community pools (menu button)
+
+#### Requests
+- `📝 Request Creator` - Request a new creator to be added (menu button)
+- `🎯 Request Content` - Request specific content from a creator (menu button)
+
+### 👑 **Main Admin Commands**
+
+#### User Management
+- `/addadmin <user_id>` - Add a sub-admin
+- `/removeadmin <user_id>` - Remove a sub-admin
+- `/addworker <user_id>` - Add a worker
+- `/removeworker <user_id>` - Remove a worker
+- `/listadmins` - List all admins
+- `/listworkers` - List all workers
+
+#### System Management
+- `/requests` - View pending user requests
+- `/titles` - View pending title submissions from workers
+- `/adminstats` - View system statistics
+- `/cache` - View cache statistics
+
+#### Title Management
+- `/approve <submission_id>` - Approve a worker's title submission
+- `/reject <submission_id>` - Reject a worker's title submission
+- `/bulkapprove` - Bulk approve multiple title submissions
+- `/bulkreject` - Bulk reject multiple title submissions
+- `/deletions` - View pending video deletion requests
+- `/approvedelete <request_id>` - Approve video deletion
+- `/rejectdelete <request_id>` - Reject video deletion
+
+#### Admin Setup
+- `/setupmainadmin` - Set up main admin (first time only)
+- `/removemainadmin` - Remove main admin status
+- `/confirmmainadminremoval` - Confirm main admin removal
+
+#### Community Pooling System
+- `/poolrequests` - View pending requests that can become pools
+- `/poolstats` - View pool system statistics and metrics
+- `/createpool request <request_id> <total_cost>` - Create pool from existing request
+- `/createpool manual <creator> <title> <type> <total_cost> [description]` - Create manual pool
+- `/completepool <pool_id> <content_url>` - Mark pool as completed and deliver content
+- `/cancelpool <pool_id> [reason]` - Cancel pool and refund all contributors
+
+### 🔧 **Sub-Admin Commands**
+
+Sub-admins have access to the same commands as main admins except:
+- Cannot add/remove other admins (`/addadmin`, `/removeadmin`)
+- Cannot use admin setup commands (`/setupmainadmin`, `/removemainadmin`, `/confirmmainadminremoval`)
+
+All other commands are available including:
+- Worker management, content management, title management, pooling system
+
+### 👷 **Worker Commands**
+
+#### Worker Features
+- `/mystats` - View your worker statistics (submissions, approvals, etc.)
+- `/workerhelp` - Show worker-specific help and guidelines
+
+#### Title Submissions
+- Reply to video messages with suggested titles (interactive feature)
+- Submit video deletion requests for inappropriate content (interactive feature)
+
+## Community Pooling System
+
+### 🎯 **How Dynamic Pricing Works**
+
+The community pooling system uses dynamic pricing where the cost per user decreases as more people join:
+
+**Example: 100 Star Pool (Max 50 Contributors)**
+- 1st person: ~25 Stars (early adopter price)
+- 5th person: ~15 Stars (price dropping)
+- 10th person: ~8 Stars (getting cheaper)
+- 25th person: ~4 Stars (much cheaper)
+- 50th person: ~2 Stars (minimum price)
+
+### 📋 **Pool Creation Workflow**
+
+1. **User requests content** via existing request system
+2. **Admin views requests**: `/poolrequests`
+3. **Admin creates pool**: `/createpool request CR-123456789 100`
+4. **Users join pool** at current dynamic price via `/pools`
+5. **Price decreases** automatically as more people join
+6. **Pool completes** when total cost is reached
+7. **Admin delivers content**: `/completepool POOL-123 https://content-url`
+8. **All contributors get access** to the unlocked content
+
+### 💰 **Pool Management Examples**
+
+```bash
+# View pending requests that can become pools
+/poolrequests
+
+# Create pool from existing request (100 Stars total)
+/createpool request CR-20240115120000-123456789 100
+
+# Create manual pool
+/createpool manual bella_thorne "Beach Photos" photo_set 150 "Exclusive content"
+
+# Check pool statistics
+/poolstats
+
+# Complete a pool with content
+/completepool POOL-20240115120000-ABC123 https://example.com/content/123
+
+# Cancel a pool (refunds all contributors)
+/cancelpool POOL-20240115120000-ABC123 Content no longer available
+```
+
+### 🏊‍♀️ **User Pool Interaction**
+
+Users interact with pools through:
+- **Menu Button**: `🏊‍♀️ Community Pools`
+- **Command**: `/pools`
+- **Balance Check**: `/balance`
+
+Each pool shows:
+- Current price per person (dynamic)
+- How price decreases with more contributors
+- Progress toward completion
+- Time remaining before expiration
 
 ## Setup
 
@@ -64,8 +209,22 @@ rsync -av ../shared/ /path/to/telegram_bot/shared/
 # Create admin users
 python scripts/manage_permissions.py add-admin YOUR_TELEGRAM_USER_ID
 
+# Initialize community pooling system (creates new database tables)
+python scripts/setup_pools.py
+
 # Optional: Pre-populate cache
 python scripts/manual_cache.py
+```
+
+### 5. Environment Variables for Pooling
+Add to your `.env` file:
+```env
+# Existing variables...
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+LANDING_BASE_URL=https://your-landing-server.com
+
+# Supabase Database (required for pooling system)
+SUPABASE_DATABASE_URL=postgresql://user:password@host:port/database
 ```
 
 ## Running the Bot
@@ -107,11 +266,18 @@ sudo systemctl status freefans-bot
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Yes | - | Your Telegram Bot API token |
+| `SUPABASE_DATABASE_URL` | Yes | - | PostgreSQL connection string for pooling system |
 | `LANDING_BASE_URL` | No | `http://localhost:8001` | Landing server URL |
 | `LANDING_SECRET_KEY` | No | `your-secret-key` | Secret key for landing server auth |
 | `LANDING_ENABLED` | No | `true` | Enable/disable landing pages |
 
 ## Management Scripts
+
+### Initialize Pooling System
+```bash
+# Set up database tables for community pooling
+python scripts/setup_pools.py
+```
 
 ### Add Admin/Worker
 ```bash
@@ -134,17 +300,27 @@ The bot requires access to:
 │   ├── curl_config.txt
 │   ├── content_domains.txt
 │   ├── video_domains.txt
-│   └── permissions_config.json
+│   ├── permissions_config.json
+│   └── database.py              # Database configuration
 └── data/
     ├── onlyfans_models.csv
     ├── requests/
-    │   ├── creator_requests.csv
-    │   └── content_requests.csv
-    └── title_submissions/
-        ├── pending_titles.csv
-        ├── approved_titles.csv
-        └── rejected_titles.csv
+    │   ├── creator_requests.csv  # Used for pool creation
+    │   └── content_requests.csv  # Used for pool creation
+    ├── title_submissions/
+    │   ├── pending_titles.csv
+    │   ├── approved_titles.csv
+    │   └── rejected_titles.csv
+    └── models.py                 # Database models including pooling tables
 ```
+
+### Database Tables (Supabase PostgreSQL)
+
+The pooling system adds these tables:
+- `user_profiles` - User payment data and Star balances
+- `content_pools` - Community pools with dynamic pricing
+- `pool_contributions` - Individual user contributions
+- `transactions` - Complete payment history
 
 ## Deployment Notes
 
@@ -161,10 +337,11 @@ The bot requires access to:
 - Outbound HTTP/HTTPS to scraped websites
 
 ### Resource Requirements
-- **RAM**: 512MB minimum, 1GB recommended
-- **CPU**: 1 core minimum
-- **Disk**: 5GB minimum (depends on cache size)
+- **RAM**: 1GB minimum, 2GB recommended (increased for pooling system)
+- **CPU**: 1 core minimum, 2 cores recommended
+- **Disk**: 10GB minimum (depends on cache size and database)
 - **Network**: 100Mbps recommended
+- **Database**: PostgreSQL (Supabase) for pooling system
 
 ## Logs
 
@@ -193,6 +370,30 @@ tail -f logs.txt
 
 # Restart
 sudo systemctl restart freefans-bot
+```
+
+### Database connection issues
+```bash
+# Test database connection
+python -c "from shared.config.database import init_database; print(init_database())"
+
+# Check environment variables
+echo $SUPABASE_DATABASE_URL
+
+# Verify tables exist
+python scripts/setup_pools.py
+```
+
+### Pooling system issues
+```bash
+# Check pool statistics
+# Use /poolstats command in bot
+
+# Verify database tables
+python -c "from shared.data.models import ContentPool; print('Tables OK')"
+
+# Reset pooling system (if needed)
+python scripts/setup_pools.py
 ```
 
 ### Import errors

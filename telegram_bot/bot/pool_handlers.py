@@ -44,7 +44,12 @@ No active pools right now!
 • Once the target is reached, content is unlocked for everyone
 • The more contributors, the cheaper it is per person!
 
-Use /request to suggest new content for pooling.
+**What you can do:**
+• Use `📝 Request Creator` or `🎯 Request Content` buttons to make requests
+• Admins can create pools from requests using `/createpool`
+• Check back later for new pools!
+
+💰 Use `/balance` to check your Stars balance
 """
                 await update.message.reply_text(text, parse_mode='Markdown')
                 return
@@ -60,7 +65,7 @@ Use /request to suggest new content for pooling.
                 
                 text += f"**{i}. {pool['creator_name']}**\n"
                 text += f"📝 {pool['content_title']}\n"
-                text += f"💰 {pool['current_amount']}/{pool['target_amount']} ⭐ ({progress:.1f}%)\n"
+                text += f"💰 {pool['current_amount']}/{pool['total_cost']} ⭐ ({progress:.1f}%)\n"
                 text += f"👥 {pool['contributors_count']} contributors\n"
                 text += f"{progress_bar}\n"
                 
@@ -285,6 +290,11 @@ Use /request to suggest new content for pooling.
             for txn in transactions:
                 date = txn['created_at'].strftime('%m/%d')
                 text += f"• {date}: {txn['description']} ({txn['amount']} ⭐)\n"
+        else:
+            text += f"\n💡 **Getting Started:**\n"
+            text += f"• Buy Stars to contribute to pools\n"
+            text += f"• Join community pools to unlock content\n"
+            text += f"• Check `/pools` for active pools"
         
         keyboard = [
             [InlineKeyboardButton("💳 Buy Stars", callback_data="buy_stars_menu")],
