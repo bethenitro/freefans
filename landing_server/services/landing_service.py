@@ -10,7 +10,7 @@ import string
 import httpx
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from pathlib import Path
 from decouple import config
@@ -245,11 +245,11 @@ class LandingService:
             db = get_db_session_sync()
             try:
                 # Look for recent landing pages for this URL and creator
-                cutoff_time = datetime.utcnow() - timedelta(hours=1)  # Only reuse very recent ones
+                cutoff_time = datetime.now(timezone.utc) - timedelta(hours=1)  # Only reuse very recent ones
                 landing_page = db.query(LandingPage).filter(
                     LandingPage.original_url == original_url,
                     LandingPage.creator == creator,
-                    LandingPage.expires_at > datetime.utcnow(),
+                    LandingPage.expires_at > datetime.now(timezone.utc),
                     LandingPage.created_at >= cutoff_time
                 ).first()
                 

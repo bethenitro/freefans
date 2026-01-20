@@ -9,7 +9,7 @@ import hashlib
 import logging
 from pathlib import Path
 from typing import Optional, Set
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import sys
 from decouple import config
 
@@ -208,7 +208,7 @@ class VideoPreviewCacheService:
             db = get_db_session_sync()
             try:
                 # Get recent video landing pages from last 2 hours
-                cutoff_time = datetime.utcnow() - timedelta(hours=2)
+                cutoff_time = datetime.now(timezone.utc) - timedelta(hours=2)
                 recent_pages = crud.get_recent_landing_pages(db, cutoff_time)
                 
                 cache_tasks = []

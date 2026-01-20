@@ -6,7 +6,7 @@ import asyncio
 import httpx
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from pathlib import Path
 from decouple import config
@@ -82,7 +82,7 @@ class BotLandingService:
             raise RuntimeError("Landing service is disabled")
         
         try:
-            expires_at = datetime.now() + timedelta(hours=expires_hours)
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_hours)
             
             # Log request details
             logger.info(f"🔗 Requesting landing URL for: {creator_name} - {content_title} ({content_type})")
@@ -161,7 +161,7 @@ class BotLandingService:
             # Prepare batch request
             batch_items = []
             for item in items:
-                expires_at = datetime.now() + timedelta(hours=item.get('expires_hours', 24))
+                expires_at = datetime.now(timezone.utc) + timedelta(hours=item.get('expires_hours', 24))
                 batch_items.append({
                     'creator_name': item['creator_name'],
                     'content_title': item['content_title'],

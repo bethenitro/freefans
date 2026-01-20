@@ -11,7 +11,7 @@ import string
 import sys
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from urllib.parse import quote, unquote
 from pathlib import Path
@@ -111,6 +111,31 @@ async def shutdown_event():
     
     print("✅ Landing server shutdown complete")
 
+def cleanup_expired_links():
+    """Clean up expired links from memory storage"""
+    current_time = datetime.now(timezone.utc)
+    expired_keys = []
+    
+    for short_id, data_dict in url_storage.items():
+        try:
+            expires_at = datetime.fromisoformat(data_dict['expires'])
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            
+            if current_time > expires_at:
+                expired_keys.append(short_id)
+        except Exception as e:
+            logger.error(f"Error checking expiration for {short_id}: {e}")
+            expired_keys.append(short_id)  # Remove malformed entries
+    
+    for key in expired_keys:
+        del url_storage[key]
+    
+    if expired_keys:
+        logger.info(f"🗑️ Cleaned up {len(expired_keys)} expired links from memory")
+    
+    return len(expired_keys)
+
 def generate_short_id(length: int = 8) -> str:
     """Generate a short random ID for URLs"""
     alphabet = string.ascii_letters + string.digits
@@ -129,8 +154,8 @@ class ContentLink(BaseModel):
 
 def generate_signed_url(content_data: Dict[str, Any], expires_hours: int = 24) -> str:
     """Generate a short signed URL for content access"""
-    # Create expiration timestamp
-    expires_at = datetime.now() + timedelta(hours=expires_hours)
+    # Create expiration timestamp with timezone awareness
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_hours)
     
     # Generate a short unique ID
     short_id = generate_short_id(8)
@@ -154,11 +179,17 @@ def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
         # First check in-memory storage
         data_dict = url_storage.get(short_id)
         if data_dict:
-            # Check expiration
+            # Check expiration - use UTC for consistency
             expires_at = datetime.fromisoformat(data_dict['expires'])
-            if datetime.now() > expires_at:
+            # Ensure we're comparing timezone-aware datetimes
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            
+            current_time = datetime.now(timezone.utc)
+            if current_time > expires_at:
                 # Clean up expired link
                 del url_storage[short_id]
+                logger.info(f"🗑️ Cleaned up expired link: {short_id}")
                 return None
             return data_dict
         
@@ -170,28 +201,38 @@ def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
             db = get_db_session_sync()
             try:
                 landing_page = crud.get_landing_page(db, short_id)
-                if landing_page and landing_page.expires_at > datetime.utcnow():
-                    # Load into memory for faster future access
-                    data_dict = {
-                        'creator': landing_page.creator,
-                        'title': landing_page.title,
-                        'type': landing_page.content_type,
-                        'url': landing_page.original_url,
-                        'preview': landing_page.preview_url,
-                        'thumbnail': landing_page.thumbnail_url,
-                        'expires': landing_page.expires_at.isoformat()
-                    }
-                    url_storage[short_id] = data_dict
-                    return data_dict
+                if landing_page:
+                    # Ensure consistent timezone handling
+                    current_time = datetime.now(timezone.utc)
+                    expires_at = landing_page.expires_at
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    
+                    if expires_at > current_time:
+                        # Load into memory for faster future access
+                        data_dict = {
+                            'creator': landing_page.creator,
+                            'title': landing_page.title,
+                            'type': landing_page.content_type,
+                            'url': landing_page.original_url,
+                            'preview': landing_page.preview_url,
+                            'thumbnail': landing_page.thumbnail_url,
+                            'expires': expires_at.isoformat()
+                        }
+                        url_storage[short_id] = data_dict
+                        logger.info(f"📥 Loaded link from database: {short_id}")
+                        return data_dict
+                    else:
+                        logger.info(f"🗑️ Found expired link in database: {short_id}")
             finally:
                 db.close()
         except Exception as e:
-            print(f"Failed to load from Supabase: {e}")
+            logger.error(f"Failed to load from Supabase: {e}")
         
         return None
         
     except Exception as e:
-        print(f"Error in verify_short_url: {e}")
+        logger.error(f"Error in verify_short_url: {e}")
         return None
 
 @app.get("/", response_class=HTMLResponse)
@@ -322,10 +363,13 @@ async def test_home_page(request: Request):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint with detailed status"""
+    """Health check endpoint with detailed status and automatic cleanup"""
     try:
         from shared.config.database import get_db_session_sync
         from shared.data import crud
+        
+        # Clean up expired links from memory
+        cleaned_count = cleanup_expired_links()
         
         # Check database connection
         db_status = "unknown"
@@ -334,7 +378,7 @@ async def health_check():
             db = get_db_session_sync()
             try:
                 # Try a simple query
-                cutoff_time = datetime.utcnow() - timedelta(hours=24)
+                cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
                 recent_pages = crud.get_recent_landing_pages(db, cutoff_time)
                 landing_pages_count = len(recent_pages)
                 db_status = "connected"
@@ -345,19 +389,34 @@ async def health_check():
         
         return {
             "status": "healthy", 
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "stored_urls_memory": len(url_storage),
             "stored_urls_db": landing_pages_count,
+            "cleaned_expired_links": cleaned_count,
             "database_status": db_status,
             "base_url": config('LANDING_BASE_URL', default='http://localhost:8001')
         }
     except Exception as e:
         return {
             "status": "error",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "error": str(e),
             "stored_urls_memory": len(url_storage)
         }
+
+@app.post("/api/cleanup")
+async def manual_cleanup():
+    """Manual cleanup endpoint for debugging"""
+    try:
+        cleaned_count = cleanup_expired_links()
+        return {
+            "status": "success",
+            "cleaned_links": cleaned_count,
+            "remaining_links": len(url_storage),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 # API endpoint for the bot to generate landing page URLs with preview extraction
 @app.post("/api/generate-link")
@@ -371,11 +430,17 @@ async def generate_landing_link(content_data: ContentLink):
     
     logger.info(f"🔗 Generating landing link for: {content_data.content_title} (type: {content_data.content_type})")
     
-    # Calculate expiration
+    # Calculate expiration - ensure timezone consistency
     if isinstance(content_data.expires_at, str):
         expires_at = datetime.fromisoformat(content_data.expires_at)
     else:
         expires_at = content_data.expires_at
+    
+    # Ensure expires_at is timezone-aware (UTC)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    elif expires_at.tzinfo != timezone.utc:
+        expires_at = expires_at.astimezone(timezone.utc)
     
     preview_url_to_use = content_data.preview_url
     
@@ -395,7 +460,7 @@ async def generate_landing_link(content_data: ContentLink):
                     existing = db.query(LandingPage).filter(
                         LandingPage.original_url == content_data.original_url,
                         LandingPage.preview_url.isnot(None),
-                        LandingPage.expires_at > datetime.utcnow()
+                        LandingPage.expires_at > datetime.now(timezone.utc)
                     ).order_by(LandingPage.created_at.desc()).first()
                     
                     if existing and existing.preview_url:
@@ -538,6 +603,12 @@ async def generate_batch_landing_links(content_items: List[ContentLink]):
         else:
             expires_at = content_data.expires_at
         
+        # Ensure expires_at is timezone-aware (UTC)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        elif expires_at.tzinfo != timezone.utc:
+            expires_at = expires_at.astimezone(timezone.utc)
+        
         prepared_items.append({
             'short_id': short_id,
             'content_data': content_data,
@@ -565,7 +636,7 @@ async def generate_batch_landing_links(content_items: List[ContentLink]):
                         existing = db.query(LandingPage).filter(
                             LandingPage.original_url == content_data.original_url,
                             LandingPage.preview_url.isnot(None),
-                            LandingPage.expires_at > datetime.utcnow()
+                            LandingPage.expires_at > datetime.now(timezone.utc)
                         ).order_by(LandingPage.created_at.desc()).first()
                         
                         if existing and existing.preview_url:
