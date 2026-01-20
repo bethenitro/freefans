@@ -107,7 +107,7 @@ No active pools right now!
                 await self._handle_view_pool(query, data.replace('view_pool_', ''))
             
             elif data.startswith('join_pool_'):
-                await self._handle_join_pool(query, data.replace('join_pool_', ''))
+                await self._handle_join_pool(query, context, data.replace('join_pool_', ''))
             
             elif data.startswith('contribute_'):
                 # Legacy support for old contribution system
@@ -115,7 +115,7 @@ No active pools right now!
                 if len(parts) >= 3:
                     pool_id = '_'.join(parts[1:-1])
                     amount = int(parts[-1])
-                    await self._handle_contribute_to_pool(query, pool_id, amount)
+                    await self._handle_contribute_to_pool(query, context, pool_id, amount)
             
             elif data.startswith('custom_contribute_'):
                 pool_id = data.replace('custom_contribute_', '')
@@ -129,7 +129,7 @@ No active pools right now!
             
             elif data.startswith('buy_stars_'):
                 package = data.replace('buy_stars_', '')
-                await self._handle_buy_stars(query, package)
+                await self._handle_buy_stars(query, context, package)
             
             elif data == 'back_to_pools':
                 await self._handle_back_to_pools(query)
@@ -203,7 +203,7 @@ No active pools right now!
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     
-    async def _handle_contribute_to_pool(self, query, pool_id: str, amount: int):
+    async def _handle_contribute_to_pool(self, query, context, pool_id: str, amount: int):
         """Handle contribution to a pool."""
         user_id = query.from_user.id
         
@@ -223,7 +223,7 @@ No active pools right now!
         
         try:
             # Send invoice
-            await query.bot.send_invoice(
+            await context.bot.send_invoice(
                 chat_id=query.message.chat_id,
                 title=title,
                 description=description,
@@ -330,7 +330,7 @@ No active pools right now!
         
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     
-    async def _handle_buy_stars(self, query, package: str):
+    async def _handle_buy_stars(self, query, context, package: str):
         """Handle buying stars."""
         user_id = query.from_user.id
         
@@ -340,7 +340,7 @@ No active pools right now!
         
         try:
             # Send invoice
-            await query.bot.send_invoice(
+            await context.bot.send_invoice(
                 chat_id=query.message.chat_id,
                 title=title,
                 description=description,
@@ -521,7 +521,7 @@ No active pools right now!
             await update.message.reply_text("❌ Error processing custom amount.")
             return True
     
-    async def _handle_join_pool(self, query, pool_id: str):
+    async def _handle_join_pool(self, query, context, pool_id: str):
         """Handle joining a pool with dynamic pricing."""
         user_id = query.from_user.id
         
@@ -549,7 +549,7 @@ No active pools right now!
         
         try:
             # Send invoice
-            await query.bot.send_invoice(
+            await context.bot.send_invoice(
                 chat_id=query.message.chat_id,
                 title=title,
                 description=description,
