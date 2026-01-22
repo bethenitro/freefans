@@ -179,7 +179,7 @@ No active pools right now!
                     pool['contributors_count'] + additional, 
                     pool['max_contributors']
                 )
-                    text += f"• +{additional} more contributors: {future_price} ⭐ each\n"
+                text += f"• +{additional} more contributors: {future_price} ⭐ each\n"
         
         # Show expiration
         from datetime import timezone
