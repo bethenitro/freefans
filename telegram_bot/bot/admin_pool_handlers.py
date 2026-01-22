@@ -1,5 +1,5 @@
 """
-Admin Pool Handlers - Admin commands for managing community pools
+Admin Deal Handlers - Admin commands for managing content deals
 """
 
 import logging
@@ -22,17 +22,17 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class AdminPoolHandlers:
-    """Handles admin commands for pool management."""
+class AdminDealHandlers:
+    """Handles admin commands for deal management."""
     
     def __init__(self):
-        """Initialize admin pool handlers."""
+        """Initialize admin deal handlers."""
         self.pool_manager = get_pool_manager()
         self.payment_manager = get_payment_manager()
         self.permissions_manager = get_permissions_manager()
     
     async def handle_create_pool_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /createpool command - admin only."""
+        """Handle /createdeal command - admin only."""
         user_id = update.effective_user.id
         
         # Check admin permissions
@@ -43,13 +43,13 @@ class AdminPoolHandlers:
         # Parse command arguments
         if not context.args or len(context.args) < 3:
             help_text = """
-🏊‍♀️ **Create Pool Command**
+💎 **Create Deal Command**
 
 **Option 1 - From Request:**
-`/createpool request <request_id> <total_cost>`
+`/createdeal request <request_id> <total_cost>`
 
 **Option 2 - Manual:**
-`/createpool manual <creator> <title> <type> <total_cost> [description]`
+`/createdeal manual <creator> <title> <type> <total_cost> [description]`
 
 **Parameters:**
 • `request_id` - Request ID from /requests command
@@ -60,10 +60,10 @@ class AdminPoolHandlers:
 • `description` - Optional description
 
 **Examples:**
-`/createpool request CR-20240115120000-123456789 100`
-`/createpool manual bella_thorne "Premium Photos" photo_set 50 "Exclusive beach photoshoot"`
+`/createdeal request CR-20240115120000-123456789 100`
+`/createdeal manual bella_thorne "Premium Photos" photo_set 50 "Exclusive beach photoshoot"`
 
-💡 **Dynamic Pricing:** Users pay less as more people join!
+💡 **Dynamic Pricing:** Price drops as more people buy!
 """
             await update.message.reply_text(help_text, parse_mode='Markdown')
             return
@@ -72,9 +72,9 @@ class AdminPoolHandlers:
             mode = context.args[0].lower()
             
             if mode == 'request':
-                # Create pool from existing request
+                # Create deal from existing request
                 if len(context.args) < 3:
-                    await update.message.reply_text("❌ Usage: `/createpool request <request_id> <total_cost>`", parse_mode='Markdown')
+                    await update.message.reply_text("❌ Usage: `/createdeal request <request_id> <total_cost>`", parse_mode='Markdown')
                     return
                 
                 request_id = context.args[1]
@@ -93,34 +93,32 @@ class AdminPoolHandlers:
                 
                 if pool_id:
                     pool = self.pool_manager.get_pool(pool_id)
-                    text = f"✅ **Pool Created from Request!**\n\n"
-                    text += f"🆔 **Pool ID:** `{pool_id}`\n"
+                    text = f"✅ **Deal Created from Request!**\n\n"
+                    text += f"🆔 **Deal ID:** `{pool_id}`\n"
                     text += f"📋 **Request ID:** `{request_id}`\n"
                     text += f"👤 **Creator:** {pool['creator_name']}\n"
                     text += f"📝 **Title:** {pool['content_title']}\n"
                     text += f"💰 **Total Cost:** {total_cost} ⭐\n"
                     text += f"💫 **Starting Price:** {pool['current_price_per_user']} ⭐ per person\n\n"
-                    text += f"💡 Price decreases as more people join (max {pool['max_contributors']} contributors)!"
-                    
-                    text += f"\n⏰ **Expires:** {(datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')}\n\n"
-                    text += f"Users can now join this pool using `/pools`!"
+                    text += f"💡 Price decreases as more people buy!\n\n"
+                    text += f"Users can now buy this deal using `/deals`!"
                     
                     # Add quick action buttons
                     keyboard = [
-                        [InlineKeyboardButton("🔍 View Pool", callback_data=f"view_pool_{pool_id}")],
-                        [InlineKeyboardButton("📊 Pool Stats", callback_data="admin_pool_stats")]
+                        [InlineKeyboardButton("💎 View Deal", callback_data=f"view_pool_{pool_id}")],
+                        [InlineKeyboardButton("📊 Deal Stats", callback_data="admin_pool_stats")]
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
                     
                     await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
                 else:
-                    await update.message.reply_text("❌ Failed to create pool from request. Check request ID.")
+                    await update.message.reply_text("❌ Failed to create deal from request. Check request ID.")
                 return
             
             elif mode == 'manual':
-                # Create pool manually
+                # Create deal manually
                 if len(context.args) < 5:
-                    await update.message.reply_text("❌ Usage: `/createpool manual <creator> <title> <type> <total_cost> [description]`", parse_mode='Markdown')
+                    await update.message.reply_text("❌ Usage: `/createdeal manual <creator> <title> <type> <total_cost> [description]`", parse_mode='Markdown')
                     return
                 
                 creator_name = context.args[1]
@@ -604,11 +602,11 @@ Usage: `/cancelpool <pool_id> [reason]`
 
 
 # Global instance
-_admin_pool_handlers = None
+_admin_deal_handlers = None
 
-def get_admin_pool_handlers() -> AdminPoolHandlers:
-    """Get the global admin pool handlers instance."""
-    global _admin_pool_handlers
-    if _admin_pool_handlers is None:
-        _admin_pool_handlers = AdminPoolHandlers()
-    return _admin_pool_handlers
+def get_admin_pool_handlers() -> AdminDealHandlers:
+    """Get the global admin deal handlers instance."""
+    global _admin_deal_handlers
+    if _admin_deal_handlers is None:
+        _admin_deal_handlers = AdminDealHandlers()
+    return _admin_deal_handlers

@@ -392,13 +392,13 @@ class FreeFansBot:
             if not await self._universal_channel_check(update, context):
                 return  # User blocked by channel requirements
         
-        # Route pool-related callbacks to pool handlers
+        # Route deal-related callbacks to deal handlers
         if (data.startswith("view_pool_") or data.startswith("contribute_") or 
             data.startswith("custom_contribute_") or data == "my_balance" or 
             data == "my_contributions" or data.startswith("buy_stars_") or 
-            data == "back_to_pools" or data == "buy_stars_menu" or
+            data == "back_to_deals" or data == "buy_stars_menu" or
             data.startswith("join_pool_")):
-            await self.pool_handlers.handle_pool_callback(update, context)
+            await self.pool_handlers.handle_deal_callback(update, context)
         # Route admin pool callbacks
         elif (data == "admin_pool_stats" or data == "admin_view_pools" or 
               data == "admin_cleanup_pools"):
@@ -602,13 +602,13 @@ def main():
     application.add_handler(CommandHandler("fixchannellinks", create_channel_protected_handler(fix_channel_links_command)))
     application.add_handler(CommandHandler("toggleadminbypass", create_channel_protected_handler(toggle_admin_bypass_command)))
     
-    # Pool commands with channel protection
-    async def pools_command_wrapper(update, context):
+    # Create a wrapper function for deals command
+    async def deals_command_wrapper(update, context):
         if not await bot._universal_channel_check(update, context):
             return
         await bot.pool_handlers.handle_pools_command(update, context)
     
-    application.add_handler(CommandHandler("pools", pools_command_wrapper))
+    application.add_handler(CommandHandler("deals", deals_command_wrapper))
     
     # Create a wrapper for balance command
     async def balance_command_wrapper(update, context):

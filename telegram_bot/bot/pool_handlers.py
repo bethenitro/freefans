@@ -1,5 +1,5 @@
 """
-Pool Handlers - Handles community pooling commands and callbacks
+Deal Handlers - Handles content deal commands and callbacks
 """
 
 import logging
@@ -23,69 +23,61 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class PoolHandlers:
-    """Handles community pooling system commands and callbacks."""
+class DealHandlers:
+    """Handles content deal system commands and callbacks."""
     
     def __init__(self):
-        """Initialize pool handlers."""
+        """Initialize deal handlers."""
         self.pool_manager = get_pool_manager()
         self.payment_manager = get_payment_manager()
     
     async def handle_pools_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /pools command - show active pools."""
+        """Handle /deals command - show active content deals."""
         try:
             user_id = update.effective_user.id
             
-            # Get active pools
-            pools = self.pool_manager.get_active_pools(limit=10)
+            # Get active deals
+            deals = self.pool_manager.get_active_pools(limit=10)
             
-            if not pools:
+            if not deals:
                 text = """
-🏊‍♀️ **Community Pools**
+💎 **Content Deals**
 
-No active pools right now! 
+No active deals right now! 
 
 💰 Use `/balance` to check your Stars balance
 """
                 await update.message.reply_text(text, parse_mode='Markdown')
                 return
             
-            # Create pools list
-            text = "🏊‍♀️ **Active Community Pools**\n\n"
-            text += "💡 Join a pool to unlock exclusive content!\n\n"
+            # Create deals list
+            text = "💎 **Active Content Deals**\n\n"
+            text += "💡 Get exclusive content at discounted prices!\n\n"
             
             keyboard = []
-            for i, pool in enumerate(pools[:5], 1):  # Show max 5 pools
-                progress = pool['completion_percentage']
+            for i, deal in enumerate(deals[:5], 1):  # Show max 5 deals
+                progress = deal['completion_percentage']
                 progress_bar = self._create_progress_bar(progress)
                 
-                text += f"**{i}. {pool['creator_name']}**\n"
-                text += f"📝 {pool['content_title']}\n"
-                text += f"💰 {pool['current_amount']}/{pool['total_cost']} ⭐ ({progress:.1f}%)\n"
-                text += f"{progress_bar}\n"
-                
-                # Calculate days remaining
-                from datetime import timezone
-                now = datetime.now(timezone.utc)
-                days_left = (pool['expires_at'] - now).days
-                if days_left > 0:
-                    text += f"⏰ {days_left} days left\n\n"
-                else:
-                    text += f"⏰ Expires soon!\n\n"
+                text += f"**{i}. {deal['creator_name']}**\n"
+                text += f"📝 {deal['content_title']}\n"
+                text += f"💰 Current Price: {deal['current_price_per_user']} ⭐ (drops as more buy!)\n"
+                text += f"📊 Progress: {progress:.1f}%\n"
+                text += f"{progress_bar}\n\n"
                 
                 # Add view button
                 keyboard.append([InlineKeyboardButton(
-                    f"🔍 View Pool {i}", 
-                    callback_data=f"view_pool_{pool['pool_id']}"
+                    f"💎 View Deal {i}", 
+                    callback_data=f"view_pool_{deal['pool_id']}"
                 )])
             
             # Add navigation buttons
-            if len(pools) > 5:
+            if len(deals) > 5:
                 keyboard.append([InlineKeyboardButton("📄 View More", callback_data="pools_page_2")])
             
             keyboard.append([
                 InlineKeyboardButton("💰 My Balance", callback_data="my_balance"),
-                InlineKeyboardButton("📊 My Pools", callback_data="my_contributions")
+                InlineKeyboardButton("📊 My Purchases", callback_data="my_contributions")
             ])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -93,10 +85,10 @@ No active pools right now!
             
         except Exception as e:
             logger.error(f"Error in pools command: {e}")
-            await update.message.reply_text("❌ Error loading pools. Please try again.")
+            await update.message.reply_text("❌ Error loading deals. Please try again.")
     
-    async def handle_pool_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle pool-related callback queries."""
+    async def handle_deal_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle deal-related callback queries."""
         try:
             query = update.callback_query
             await query.answer()
@@ -105,7 +97,7 @@ No active pools right now!
             user_id = update.effective_user.id
             
             if data.startswith('view_pool_'):
-                await self._handle_view_pool(query, data.replace('view_pool_', ''))
+                await self._handle_view_deal(query, data.replace('view_pool_', ''))
             
             elif data.startswith('join_pool_'):
                 await self._handle_join_pool(query, context, data.replace('join_pool_', ''))
@@ -132,38 +124,38 @@ No active pools right now!
                 package = data.replace('buy_stars_', '')
                 await self._handle_buy_stars(query, context, package)
             
-            elif data == 'back_to_pools':
-                await self._handle_back_to_pools(query)
+            elif data == 'back_to_deals':
+                await self._handle_back_to_deals(query)
             
         except Exception as e:
-            logger.error(f"Error in pool callback: {e}")
+            logger.error(f"Error in deal callback: {e}")
             await query.edit_message_text("❌ Error processing request. Please try again.")
     
-    async def _handle_view_pool(self, query, pool_id: str):
-        """Handle viewing a specific pool."""
-        pool = self.pool_manager.get_pool(pool_id)
-        if not pool:
-            await query.edit_message_text("❌ Pool not found.")
+    async def _handle_view_deal(self, query, pool_id: str):
+        """Handle viewing a specific deal."""
+        deal = self.pool_manager.get_pool(pool_id)
+        if not deal:
+            await query.edit_message_text("❌ Deal not found.")
             return
         
-        progress = pool['completion_percentage']
+        progress = deal['completion_percentage']
         progress_bar = self._create_progress_bar(progress)
         
-        text = f"🏊‍♀️ **Pool Details**\n\n"
-        text += f"👤 **Creator:** {pool['creator_name']}\n"
-        text += f"📝 **Content:** {pool['content_title']}\n"
+        text = f"💎 **Deal Details**\n\n"
+        text += f"👤 **Creator:** {deal['creator_name']}\n"
+        text += f"📝 **Content:** {deal['content_title']}\n"
         
-        if pool['content_description']:
-            text += f"📄 **Description:** {pool['content_description']}\n"
+        if deal['content_description']:
+            text += f"📄 **Description:** {deal['content_description']}\n"
         
-        text += f"🎯 **Type:** {pool['content_type'].replace('_', ' ').title()}\n\n"
+        text += f"🎯 **Type:** {deal['content_type'].replace('_', ' ').title()}\n\n"
         
-        text += f"💰 **Progress:** {pool['current_amount']}/{pool['total_cost']} ⭐ ({progress:.1f}%)\n"
+        text += f"💰 **Progress:** {deal['current_amount']}/{deal['total_cost']} ⭐ ({progress:.1f}%)\n"
         text += f"{progress_bar}\n\n"
         
         # Show current price and how it changes
-        current_price = pool['current_price_per_user']
-        remaining_cost = pool['total_cost'] - pool['current_amount']
+        current_price = deal['current_price_per_user']
+        remaining_cost = deal['total_cost'] - deal['current_amount']
         
         text += f"💫 **Current Price:** {current_price} ⭐ per person\n"
         
@@ -171,36 +163,27 @@ No active pools right now!
             text += f"💰 **Remaining Cost:** {remaining_cost} ⭐\n\n"
             
             # Show how price decreases with more contributors
-            text += f"📊 **Price gets cheaper as more join:**\n"
+            text += f"📊 **Price gets cheaper as more buy:**\n"
             for additional in [1, 5, 10]:
                 # Calculate future price without revealing current contributor count
                 future_price = self.pool_manager.calculate_dynamic_price(
-                    pool['total_cost'], 
-                    pool['contributors_count'] + additional, 
-                    pool['max_contributors']
+                    deal['total_cost'], 
+                    deal['contributors_count'] + additional, 
+                    deal['max_contributors']
                 )
-                text += f"• +{additional} more contributors: {future_price} ⭐ each\n"
-        
-        # Show expiration
-        from datetime import timezone
-        now = datetime.now(timezone.utc)
-        days_left = (pool['expires_at'] - now).days
-        if days_left > 0:
-            text += f"\n⏰ **Expires in:** {days_left} days"
-        else:
-            text += f"\n⏰ **Expires:** Soon!"
+                text += f"• +{additional} more buyers: {future_price} ⭐ each\n"
         
         # Create keyboard
         keyboard = []
         
-        if pool['status'] == 'active' and remaining_cost > 0:
-            keyboard.append([InlineKeyboardButton(f"💰 Join Pool ({current_price} ⭐)", callback_data=f"join_pool_{pool_id}")])
-        elif pool['status'] == 'completed':
+        if deal['status'] == 'active' and remaining_cost > 0:
+            keyboard.append([InlineKeyboardButton(f"💎 Buy Now ({current_price} ⭐)", callback_data=f"join_pool_{pool_id}")])
+        elif deal['status'] == 'completed':
             keyboard.append([InlineKeyboardButton("🎉 View Content", callback_data=f"view_content_{pool_id}")])
         elif remaining_cost <= 0:
-            keyboard.append([InlineKeyboardButton("✅ Pool Complete", callback_data="pool_complete")])
+            keyboard.append([InlineKeyboardButton("✅ Deal Complete", callback_data="pool_complete")])
         
-        keyboard.append([InlineKeyboardButton("🔙 Back to Pools", callback_data="back_to_pools")])
+        keyboard.append([InlineKeyboardButton("🔙 Back to Deals", callback_data="back_to_deals")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
@@ -364,9 +347,9 @@ No active pools right now!
             logger.error(f"Error sending star purchase invoice: {e}")
             await query.edit_message_text("❌ Error creating payment. Please try again.")
     
-    async def _handle_back_to_pools(self, query):
-        """Handle back to pools navigation."""
-        # Simulate the pools command
+    async def _handle_back_to_deals(self, query):
+        """Handle back to deals navigation."""
+        # Simulate the deals command
         from telegram import Message
         
         # Create a fake update for the pools command
@@ -576,11 +559,11 @@ No active pools right now!
 
 
 # Global instance
-_pool_handlers = None
+_deal_handlers = None
 
-def get_pool_handlers() -> PoolHandlers:
-    """Get the global pool handlers instance."""
-    global _pool_handlers
-    if _pool_handlers is None:
-        _pool_handlers = PoolHandlers()
-    return _pool_handlers
+def get_pool_handlers() -> DealHandlers:
+    """Get the global deal handlers instance."""
+    global _deal_handlers
+    if _deal_handlers is None:
+        _deal_handlers = DealHandlers()
+    return _deal_handlers

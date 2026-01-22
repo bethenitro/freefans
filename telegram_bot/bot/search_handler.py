@@ -42,26 +42,26 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
         return
     
     try:
-        # Check for existing pools for this creator first
+        # Check for existing deals for this creator first
         from managers.pool_manager import get_pool_manager
         pool_manager = get_pool_manager()
-        existing_pools = pool_manager.get_active_pools(limit=5, creator_filter=creator_name)
+        existing_deals = pool_manager.get_active_pools(limit=5, creator_filter=creator_name)
         
         # Check if we need to show multiple options or proceed directly
         search_options = await bot_instance.content_manager.search_creator_options(creator_name)
         
-        # If no content found but there are active pools, show pools
-        if not search_options and existing_pools:
-            await show_existing_pools_for_creator(search_message, creator_name, existing_pools)
+        # If no content found but there are active deals, show deals
+        if not search_options and existing_deals:
+            await show_existing_deals_for_creator(search_message, creator_name, existing_deals)
             return
         
-        # If both content and pools exist, show content first with pool option
-        if search_options and existing_pools:
-            # Store pools in session for later access
-            session.existing_pools = existing_pools
+        # If both content and deals exist, show content first with deal option
+        if search_options and existing_deals:
+            # Store deals in session for later access
+            session.existing_pools = existing_deals
         
         if not search_options:
-            # No content and no pools
+            # No content and no deals
             try:
                 message_text = f"😔 No content found for '{creator_name}'\n\n"
                 message_text += f"Try this:\n"
@@ -71,21 +71,21 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
                 
                 keyboard = []
                 
-                # Check if there are any pools for similar names
-                similar_pools = pool_manager.get_active_pools(limit=3)
-                if similar_pools:
-                    message_text += f"💡 Or check out these active community pools:\n\n"
-                    for i, pool in enumerate(similar_pools[:3], 1):
-                        completion = pool['completion_percentage']
-                        price = pool['current_price_per_user']
+                # Check if there are any deals for similar names
+                similar_deals = pool_manager.get_active_pools(limit=3)
+                if similar_deals:
+                    message_text += f"💡 Or check out these active content deals:\n\n"
+                    for i, deal in enumerate(similar_deals[:3], 1):
+                        completion = deal['completion_percentage']
+                        price = deal['current_price_per_user']
                         
-                        message_text += f"**{i}. {pool['creator_name']} - {pool['content_title'][:30]}{'...' if len(pool['content_title']) > 30 else ''}**\n"
+                        message_text += f"**{i}. {deal['creator_name']} - {deal['content_title'][:30]}{'...' if len(deal['content_title']) > 30 else ''}**\n"
                         message_text += f"💰 {price} ⭐ • 📊 {completion:.1f}%\n\n"
                         
-                        pool_text = f"🏊‍♀️ {pool['creator_name']} Pool ({price} ⭐)"
-                        keyboard.append([InlineKeyboardButton(pool_text, callback_data=f"view_pool_{pool['pool_id']}")])
+                        deal_text = f"💎 {deal['creator_name']} Deal ({price} ⭐)"
+                        keyboard.append([InlineKeyboardButton(deal_text, callback_data=f"view_pool_{deal['pool_id']}")])
                     
-                    keyboard.append([InlineKeyboardButton("🏊‍♀️ Browse All Pools", callback_data="pools_menu")])
+                    keyboard.append([InlineKeyboardButton("💎 Browse All Deals", callback_data="pools_menu")])
                 else:
                     message_text += f"💡 **Can't find '{creator_name}'? Request them!**\n\n"
                 
@@ -131,35 +131,35 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
             pass
 
 
-async def show_existing_pools_for_creator(message, creator_name: str, pools: List[Dict]):
-    """Show existing pools for a creator when no content is found."""
+async def show_existing_deals_for_creator(message, creator_name: str, deals: List[Dict]):
+    """Show existing deals for a creator when no content is found."""
     try:
-        text = f"🏊‍♀️ **Community Pools for {creator_name}**\n\n"
-        text += f"No direct content found, but there are active community pools!\n\n"
-        text += f"💡 **Join a pool to get content when it's unlocked:**\n\n"
+        text = f"💎 **Content Deals for {creator_name}**\n\n"
+        text += f"No direct content found, but there are active content deals!\n\n"
+        text += f"💡 **Get exclusive content at discounted prices:**\n\n"
         
         keyboard = []
         
-        for i, pool in enumerate(pools[:5], 1):
-            completion = pool['completion_percentage']
-            price = pool['current_price_per_user']
+        for i, deal in enumerate(deals[:5], 1):
+            completion = deal['completion_percentage']
+            price = deal['current_price_per_user']
             
-            pool_text = f"**{i}. {pool['content_title'][:40]}{'...' if len(pool['content_title']) > 40 else ''}**\n"
-            pool_text += f"💰 Current Price: {price} ⭐\n"
-            pool_text += f"📊 Progress: {completion:.1f}%\n"
+            deal_text = f"**{i}. {deal['content_title'][:40]}{'...' if len(deal['content_title']) > 40 else ''}**\n"
+            deal_text += f"💰 Current Price: {price} ⭐ (price drops as more buy!)\n"
+            deal_text += f"📊 Progress: {completion:.1f}%\n"
             
-            if i < len(pools):
-                pool_text += "\n"
+            if i < len(deals):
+                deal_text += "\n"
             
-            text += pool_text
+            text += deal_text
             
-            # Add button for each pool
-            button_text = f"🏊‍♀️ Join Pool {i} ({price} ⭐)"
-            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{pool['pool_id']}")])
+            # Add button for each deal
+            button_text = f"💎 Get Deal {i} ({price} ⭐)"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
         
         # Add navigation buttons
         keyboard.append([InlineKeyboardButton("🔍 Search Different Creator", callback_data="search_creator")])
-        keyboard.append([InlineKeyboardButton("🏊‍♀️ Browse All Pools", callback_data="pools_menu")])
+        keyboard.append([InlineKeyboardButton("💎 Browse All Deals", callback_data="pools_menu")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -171,8 +171,8 @@ async def show_existing_pools_for_creator(message, creator_name: str, pools: Lis
         )
         
     except Exception as e:
-        logger.error(f"Error showing existing pools: {e}")
-        await message.edit_text("❌ Error loading pools. Please try again.")
+        logger.error(f"Error showing existing deals: {e}")
+        await message.edit_text("❌ Error loading deals. Please try again.")
 
 
 async def display_content_directory(update: Update, bot_instance, content_directory: dict, creator_name: str) -> None:
@@ -300,7 +300,7 @@ async def display_creator_selection_page(message, session, page: int = 0):
     # Add existing pools button if there are pools for this creator
     if hasattr(session, 'existing_pools') and session.existing_pools:
         pool_count = len(session.existing_pools)
-        keyboard.append([InlineKeyboardButton(f"🏊‍♀️ View {pool_count} Active Pool{'s' if pool_count > 1 else ''}", callback_data="show_creator_pools")])
+        keyboard.append([InlineKeyboardButton(f"💎 View {pool_count} Active Deal{'s' if pool_count > 1 else ''}", callback_data="show_creator_deals")])
     
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="search_creator")])
     reply_markup = InlineKeyboardMarkup(keyboard)

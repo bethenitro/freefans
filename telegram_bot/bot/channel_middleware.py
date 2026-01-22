@@ -101,7 +101,7 @@ async def handle_check_membership_callback(update: Update, context: ContextTypes
             keyboard = [
                 [InlineKeyboardButton("🔍 Search Creator", callback_data="search_creator")],
                 [InlineKeyboardButton("🎲 Random Creator", callback_data="random_creator")],
-                [InlineKeyboardButton("🏊‍♀️ Community Pools", callback_data="pools_menu")],
+                [InlineKeyboardButton("💎 Content Deals", callback_data="pools_menu")],
                 [InlineKeyboardButton("📝 Request Creator", callback_data="request_creator")],
                 [InlineKeyboardButton("❓ Help", callback_data="help")]
             ]
