@@ -69,27 +69,40 @@ SECRET_KEY = config('LANDING_SECRET_KEY', default='your-secret-key-change-this')
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database connection pool on startup (no preloading for scalability)"""
+    """Initialize database connection pool on startup (Vercel-optimized)"""
     global db_initialized
     try:
         from shared.config.database import init_database, create_tables
         
+        logger.info("🚀 Starting up landing server on Vercel...")
+        
         # Initialize database connection pool only
         if not init_database():
-            print("⚠️ Database initialization failed - landing server will work with new pages only")
+            logger.error("⚠️ Database initialization failed - landing server will work with memory only")
             db_initialized = False
             return
         
         if not create_tables():
-            print("⚠️ Database table creation failed - landing server will work with new pages only")
+            logger.error("⚠️ Database table creation failed - landing server will work with memory only")
             db_initialized = False
             return
         
         db_initialized = True
-        print("✅ Database connection pool ready - using on-demand queries (no preloading)")
+        logger.info("✅ Database connection pool ready for Vercel deployment")
+        
+        # Test database connection
+        try:
+            from shared.config.database import get_db_session_sync
+            db = get_db_session_sync()
+            db.execute("SELECT 1")
+            db.close()
+            logger.info("✅ Database connection test successful")
+        except Exception as e:
+            logger.error(f"⚠️ Database connection test failed: {e}")
+            db_initialized = False
         
     except Exception as e:
-        print(f"⚠️ Startup error: {e}")
+        logger.error(f"⚠️ Startup error: {e}")
         db_initialized = False
 
 @app.on_event("shutdown")
@@ -174,71 +187,87 @@ def generate_signed_url(content_data: Dict[str, Any], expires_hours: int = 24) -
     return f"/c/{short_id}"
 
 def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
-    """Verify and retrieve data for a short URL"""
+    """Verify and retrieve data for a short URL - Vercel-optimized for serverless"""
     try:
         logger.info(f"🔍 Verifying short URL: {short_id}")
         
-        # First check in-memory storage
+        # Check in-memory storage first (fastest for current request)
         data_dict = url_storage.get(short_id)
         if data_dict:
-            logger.info(f"📥 Found {short_id} in memory storage")
+            logger.info(f"📥 Found {short_id} in memory storage (fast path)")
             # Check expiration - use UTC for consistency
-            expires_at = datetime.fromisoformat(data_dict['expires'])
-            # Ensure we're comparing timezone-aware datetimes
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            
-            current_time = datetime.now(timezone.utc)
-            if current_time > expires_at:
-                # Clean up expired link
-                del url_storage[short_id]
-                logger.info(f"🗑️ Cleaned up expired link: {short_id}")
-                return None
-            logger.info(f"✅ Valid link found in memory: {short_id}")
-            return data_dict
-        
-        logger.info(f"🔍 Not found in memory, checking database for: {short_id}")
-        
-        # If not in memory, try to load from Supabase
-        try:
-            from shared.config.database import get_db_session_sync
-            from shared.data import crud
-            
-            db = get_db_session_sync()
             try:
-                landing_page = crud.get_landing_page(db, short_id)
-                if landing_page:
-                    logger.info(f"📥 Found {short_id} in database")
-                    # Ensure consistent timezone handling
-                    current_time = datetime.now(timezone.utc)
-                    expires_at = landing_page.expires_at
-                    if expires_at.tzinfo is None:
-                        expires_at = expires_at.replace(tzinfo=timezone.utc)
-                    
-                    if expires_at > current_time:
-                        # Load into memory for faster future access
-                        data_dict = {
-                            'creator': landing_page.creator,
-                            'title': landing_page.title,
-                            'type': landing_page.content_type,
-                            'url': landing_page.original_url,
-                            'preview': landing_page.preview_url,
-                            'thumbnail': landing_page.thumbnail_url,
-                            'expires': expires_at.isoformat()
-                        }
-                        url_storage[short_id] = data_dict
-                        logger.info(f"✅ Loaded valid link from database: {short_id}")
-                        return data_dict
-                    else:
-                        logger.info(f"🗑️ Found expired link in database: {short_id}")
+                expires_at = datetime.fromisoformat(data_dict['expires'])
+                # Ensure we're comparing timezone-aware datetimes
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                
+                current_time = datetime.now(timezone.utc)
+                if current_time > expires_at:
+                    # Clean up expired link
+                    del url_storage[short_id]
+                    logger.info(f"🗑️ Cleaned up expired link from memory: {short_id}")
                 else:
-                    logger.warning(f"❌ Short URL not found in database: {short_id}")
-            finally:
-                db.close()
-        except Exception as e:
-            logger.error(f"❌ Failed to load from Supabase for {short_id}: {e}")
+                    logger.info(f"✅ Valid link found in memory: {short_id}")
+                    return data_dict
+            except Exception as e:
+                logger.error(f"❌ Error parsing expiration for {short_id}: {e}")
+                # Remove malformed entry
+                del url_storage[short_id]
         
-        logger.warning(f"❌ Short URL verification failed: {short_id}")
+        # On Vercel, try database as fallback (memory is reset between requests)
+        if db_initialized:
+            try:
+                from shared.config.database import get_db_session_sync
+                from shared.data import crud
+                
+                logger.info(f"🔍 Checking database for: {short_id}")
+                db = get_db_session_sync()
+                try:
+                    landing_page = crud.get_landing_page(db, short_id)
+                    if landing_page:
+                        logger.info(f"� Found {short_id} in database")
+                        # Ensure consistent timezone handling
+                        current_time = datetime.now(timezone.utc)
+                        expires_at = landing_page.expires_at
+                        if expires_at.tzinfo is None:
+                            expires_at = expires_at.replace(tzinfo=timezone.utc)
+                        
+                        if expires_at > current_time:
+                            # Create data dict from database
+                            data_dict = {
+                                'creator': landing_page.creator,
+                                'title': landing_page.title,
+                                'type': landing_page.content_type,
+                                'url': landing_page.original_url,
+                                'preview': landing_page.preview_url,
+                                'thumbnail': landing_page.thumbnail_url,
+                                'expires': expires_at.isoformat()
+                            }
+                            # Store in memory for subsequent requests in this function call
+                            url_storage[short_id] = data_dict
+                            logger.info(f"✅ Loaded valid link from database: {short_id}")
+                            return data_dict
+                        else:
+                            logger.info(f"🗑️ Found expired link in database: {short_id}")
+                            # Clean up expired link
+                            crud.delete_landing_page(db, short_id)
+                            return None
+                    else:
+                        logger.warning(f"❌ Short URL not found in database: {short_id}")
+                except Exception as db_error:
+                    logger.error(f"❌ Database query failed for {short_id}: {db_error}")
+                finally:
+                    try:
+                        db.close()
+                    except:
+                        pass  # Ignore close errors
+            except Exception as e:
+                logger.error(f"❌ Database connection failed for {short_id}: {e}")
+        else:
+            logger.warning(f"⚠️ Database not initialized, cannot check for {short_id}")
+        
+        logger.warning(f"❌ Short URL verification failed (not found anywhere): {short_id}")
         return None
         
     except Exception as e:
@@ -377,13 +406,56 @@ async def test_no_preview_content(request: Request):
 
 @app.get("/debug/storage")
 async def debug_storage():
-    """Debug endpoint to check URL storage"""
-    return {
-        "memory_storage_count": len(url_storage),
-        "memory_storage_keys": list(url_storage.keys()),
-        "db_initialized": db_initialized,
-        "base_url": config('LANDING_BASE_URL', default='http://localhost:8001')
-    }
+    """Debug endpoint to check URL storage - Vercel optimized"""
+    try:
+        # Test database connection
+        db_test_result = "not_tested"
+        db_records_count = 0
+        
+        if db_initialized:
+            try:
+                from shared.config.database import get_db_session_sync
+                from shared.data import crud
+                
+                db = get_db_session_sync()
+                try:
+                    # Count recent landing pages
+                    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
+                    recent_pages = crud.get_recent_landing_pages(db, cutoff_time)
+                    db_records_count = len(recent_pages)
+                    db_test_result = "success"
+                except Exception as e:
+                    db_test_result = f"query_failed: {str(e)[:100]}"
+                finally:
+                    db.close()
+            except Exception as e:
+                db_test_result = f"connection_failed: {str(e)[:100]}"
+        else:
+            db_test_result = "not_initialized"
+        
+        return {
+            "environment": "vercel",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "memory_storage": {
+                "count": len(url_storage),
+                "keys": list(url_storage.keys())[:10],  # Show first 10 keys
+                "note": "Memory resets between Vercel function calls"
+            },
+            "database": {
+                "initialized": db_initialized,
+                "test_result": db_test_result,
+                "recent_records_24h": db_records_count
+            },
+            "config": {
+                "base_url": config('LANDING_BASE_URL', default='http://localhost:8001'),
+                "secret_configured": bool(config('LANDING_SECRET_KEY', default=''))
+            }
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
 @app.get("/test/simple")
 async def test_simple_landing(request: Request):
@@ -415,47 +487,72 @@ async def test_simple_landing(request: Request):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint with detailed status and automatic cleanup"""
+    """Health check endpoint with detailed status and database test"""
     try:
-        from shared.config.database import get_db_session_sync
-        from shared.data import crud
+        # Test database connection
+        db_status = "disconnected"
+        db_error = None
         
-        # Clean up expired links from memory
-        cleaned_count = cleanup_expired_links()
-        
-        # Check database connection
-        db_status = "unknown"
-        landing_pages_count = 0
-        try:
-            db = get_db_session_sync()
+        if db_initialized:
             try:
-                # Try a simple query
-                cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
-                recent_pages = crud.get_recent_landing_pages(db, cutoff_time)
-                landing_pages_count = len(recent_pages)
-                db_status = "connected"
-            finally:
-                db.close()
-        except Exception as e:
-            db_status = f"error: {str(e)[:50]}"
+                from shared.config.database import get_db_session_sync
+                db = get_db_session_sync()
+                try:
+                    # Simple query to test connection
+                    result = db.execute("SELECT 1 as test").fetchone()
+                    if result and result[0] == 1:
+                        db_status = "connected"
+                    else:
+                        db_status = "error"
+                        db_error = "Query returned unexpected result"
+                except Exception as e:
+                    db_status = "error"
+                    db_error = str(e)
+                finally:
+                    db.close()
+            except Exception as e:
+                db_status = "error"
+                db_error = str(e)
+        
+        # Cleanup expired URLs from memory
+        current_time = datetime.now(timezone.utc)
+        expired_keys = []
+        for short_id, data in list(url_storage.items()):
+            try:
+                expires_at = datetime.fromisoformat(data['expires'])
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if current_time > expires_at:
+                    expired_keys.append(short_id)
+            except:
+                expired_keys.append(short_id)  # Remove malformed entries
+        
+        for key in expired_keys:
+            del url_storage[key]
         
         return {
-            "status": "healthy", 
+            "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "stored_urls_memory": len(url_storage),
-            "stored_urls_db": landing_pages_count,
-            "cleaned_expired_links": cleaned_count,
-            "database_status": db_status,
+            "database": {
+                "initialized": db_initialized,
+                "status": db_status,
+                "error": db_error
+            },
+            "memory_storage": {
+                "active_links": len(url_storage),
+                "cleaned_expired": len(expired_keys)
+            },
+            "environment": "vercel",
             "base_url": config('LANDING_BASE_URL', default='http://localhost:8001')
         }
+        
     except Exception as e:
+        logger.error(f"Health check failed: {e}")
         return {
             "status": "error",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
             "error": str(e),
-            "stored_urls_memory": len(url_storage)
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
-
 @app.post("/api/cleanup")
 async def manual_cleanup():
     """Manual cleanup endpoint for debugging"""
@@ -553,12 +650,45 @@ async def generate_landing_link(content_data: ContentLink):
         'expires': expires_at.isoformat()
     }
     
+    # CRITICAL: Store in database IMMEDIATELY for Vercel serverless reliability
+    if db_initialized:
+        try:
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            
+            logger.info(f"💾 Storing {short_id} in database immediately...")
+            db = get_db_session_sync()
+            try:
+                # Use upsert to handle potential duplicates
+                crud.upsert_landing_page(
+                    db=db,
+                    short_id=short_id,
+                    creator=content_data.creator_name,
+                    title=content_data.content_title,
+                    content_type=content_data.content_type,
+                    original_url=content_data.original_url,
+                    preview_url=preview_url_to_use,
+                    thumbnail_url=content_data.thumbnail_url,
+                    expires_at=expires_at
+                )
+                logger.info(f"✅ Stored {short_id} in database immediately")
+            except Exception as db_error:
+                logger.error(f"❌ Immediate database storage failed for {short_id}: {db_error}")
+                # Continue anyway - memory storage might work for this request
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"❌ Database connection failed for immediate storage {short_id}: {e}")
+    else:
+        logger.warning(f"⚠️ DB not available, relying on memory only for {short_id}")
+    
     # Return URL immediately with preview
     base_url = config('LANDING_BASE_URL', default='http://localhost:8001')
     full_url = f"{base_url}/c/{short_id}"
     
-    # Start background task to cache the preview image and store in Supabase
-    asyncio.create_task(_background_cache_and_store(short_id, content_data, expires_at, preview_url_to_use))
+    # Start background task to cache the preview image (optional optimization)
+    if content_data.content_type and '🎬' in content_data.content_type and preview_url_to_use:
+        asyncio.create_task(_background_cache_preview_image(short_id, preview_url_to_use))
     
     elapsed_time = time.time() - start_time
     logger.info(f"✅ Landing link generated in {elapsed_time:.3f}s: {full_url}")
@@ -570,69 +700,50 @@ async def generate_landing_link(content_data: ContentLink):
         "expires_at": expires_at.isoformat()
     }
 
-async def _background_cache_and_store(short_id: str, content_data: ContentLink, expires_at: datetime, preview_url: Optional[str] = None):
-    """Background task to cache preview image and store in Supabase"""
-    import time
-    bg_start_time = time.time()
-    
+async def _background_cache_preview_image(short_id: str, preview_url: str):
+    """Background task to cache a video preview image (optional optimization)"""
     try:
-        from shared.config.database import get_db_session_sync, init_database, create_tables
-        from shared.data import crud
-        
-        preview_url_to_store = preview_url
-        
-        # Cache the preview image if we have one for videos
-        if content_data.content_type and '🎬' in content_data.content_type and preview_url_to_store:
-            try:
-                logger.info(f"💾 Background: Caching preview image for {short_id}")
-                cache_start = time.time()
-                from services.image_cache_service import video_preview_cache_service
-                # Use asyncio.wait_for to add timeout protection
-                cached_path = await asyncio.wait_for(
-                    video_preview_cache_service.cache_video_preview(preview_url_to_store),
-                    timeout=15.0  # 15 second timeout for downloading/caching
-                )
-                cache_time = time.time() - cache_start
-                if cached_path:
-                    # Update preview URL to use cached version
-                    base_url = config('LANDING_BASE_URL', default='http://localhost:8001')
-                    preview_url_to_store = f"{base_url}{cached_path}"
-                    logger.info(f"✅ Background: Cached preview in {cache_time:.2f}s for {short_id}")
-                else:
-                    logger.info(f"ℹ️ Background: Preview already cached or failed in {cache_time:.2f}s for {short_id}")
-            except asyncio.TimeoutError:
-                logger.warning(f"⏱️ Background: Timeout caching preview for {short_id}")
-            except Exception as e:
-                logger.error(f"❌ Background: Failed to cache preview for {short_id}: {e}")
-        
-        # Store in Supabase with potentially updated preview URL (use global DB flag)
-        if db_initialized:
-            from shared.config.database import get_db_session_sync
-            from shared.data import crud
+        logger.info(f"💾 Background: Caching preview image for {short_id}")
+        cache_start = time.time()
+        from services.image_cache_service import video_preview_cache_service
+        # Use asyncio.wait_for to add timeout protection
+        cached_path = await asyncio.wait_for(
+            video_preview_cache_service.cache_video_preview(preview_url),
+            timeout=15.0  # 15 second timeout for downloading/caching
+        )
+        cache_time = time.time() - cache_start
+        if cached_path:
+            # Update preview URL to use cached version in database
+            base_url = config('LANDING_BASE_URL', default='http://localhost:8001')
+            cached_preview_url = f"{base_url}{cached_path}"
             
-            db = get_db_session_sync()
-            try:
-                crud.create_landing_page(
-                    db=db,
-                    short_id=short_id,
-                    creator=content_data.creator_name,
-                    title=content_data.content_title,
-                    content_type=content_data.content_type,
-                    original_url=content_data.original_url,
-                    preview_url=preview_url_to_store,
-                    thumbnail_url=content_data.thumbnail_url,
-                    expires_at=expires_at
-                )
-                total_time = time.time() - bg_start_time
-                logger.info(f"✅ Background: Stored {short_id} in Supabase (total: {total_time:.2f}s)")
-            finally:
-                db.close()
+            # Update database with cached URL
+            if db_initialized:
+                try:
+                    from shared.config.database import get_db_session_sync
+                    from shared.data import crud
+                    
+                    db = get_db_session_sync()
+                    try:
+                        crud.update_landing_page(db, short_id, preview_url=cached_preview_url)
+                        logger.info(f"✅ Background: Updated cached preview URL for {short_id}")
+                    finally:
+                        db.close()
+                except Exception as e:
+                    logger.error(f"❌ Background: Failed to update cached URL for {short_id}: {e}")
+            
+            logger.info(f"✅ Background: Cached preview in {cache_time:.2f}s for {short_id}")
         else:
-            logger.warning(f"⚠️ Background: DB not available, skipping Supabase storage for {short_id}")
-            
+            logger.info(f"ℹ️ Background: Preview already cached or failed in {cache_time:.2f}s for {short_id}")
+    except asyncio.TimeoutError:
+        logger.warning(f"⏱️ Background: Timeout caching preview for {short_id}")
     except Exception as e:
-        total_time = time.time() - bg_start_time
-        logger.error(f"❌ Background: Task failed for {short_id} after {total_time:.2f}s: {e}")
+        logger.error(f"❌ Background: Failed to cache preview for {short_id}: {e}")
+
+async def _background_cache_and_store(short_id: str, content_data: ContentLink, expires_at: datetime, preview_url: Optional[str] = None):
+    """DEPRECATED: Background task replaced by immediate database storage"""
+    # This function is no longer used - database storage is now immediate
+    pass
 
 # Batch endpoint for efficient bulk URL generation with parallel preview extraction
 @app.post("/api/generate-batch-links")
@@ -725,11 +836,22 @@ async def generate_batch_landing_links(content_items: List[ContentLink]):
     extract_time = time.time() - extract_start
     logger.info(f"⏱️ Preview extraction completed in {extract_time:.2f}s")
     
-    # Step 3: Store all items in memory and prepare responses
-    logger.info(f"💾 Storing {len(items_with_previews)} items in memory")
+    # Step 3: Store all items in memory and database immediately
+    logger.info(f"💾 Storing {len(items_with_previews)} items in memory and database")
     store_start = time.time()
     results = []
     base_url = config('LANDING_BASE_URL', default='http://localhost:8001')
+    
+    # Prepare database connection for batch operations
+    db_session = None
+    if db_initialized:
+        try:
+            from shared.config.database import get_db_session_sync
+            from shared.data import crud
+            db_session = get_db_session_sync()
+            logger.info(f"📊 Database ready for batch storage")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize database for batch: {e}")
     
     for item in items_with_previews:
         # Handle exceptions from gather
@@ -753,6 +875,24 @@ async def generate_batch_landing_links(content_items: List[ContentLink]):
             'expires': expires_at.isoformat()
         }
         
+        # Store in database immediately (critical for Vercel)
+        if db_session:
+            try:
+                crud.upsert_landing_page(
+                    db=db_session,
+                    short_id=short_id,
+                    creator=content_data.creator_name,
+                    title=content_data.content_title,
+                    content_type=content_data.content_type,
+                    original_url=content_data.original_url,
+                    preview_url=preview_url,
+                    thumbnail_url=content_data.thumbnail_url,
+                    expires_at=expires_at
+                )
+                logger.debug(f"✅ Stored {short_id} in database")
+            except Exception as db_error:
+                logger.error(f"❌ Database storage failed for {short_id}: {db_error}")
+        
         full_url = f"{base_url}/c/{short_id}"
         results.append({
             "landing_url": full_url,
@@ -760,46 +900,32 @@ async def generate_batch_landing_links(content_items: List[ContentLink]):
             "expires_at": expires_at.isoformat()
         })
     
-    store_time = time.time() - store_start
-    logger.info(f"⏱️ Memory storage completed in {store_time:.2f}s")
+    # Close database connection
+    if db_session:
+        try:
+            db_session.close()
+            logger.info(f"📊 Database batch storage completed")
+        except:
+            pass
     
-    # Step 4: Dispatch background tasks to Celery (only for videos, not images)
+    store_time = time.time() - store_start
+    logger.info(f"⏱️ Memory and database storage completed in {store_time:.2f}s")
+    
+    # Step 4: Dispatch background tasks for image caching (optional optimization)
     video_items = [item for item in items_with_previews 
                    if not isinstance(item, Exception) 
                    and item['content_data'].content_type 
-                   and '🎬' in item['content_data'].content_type]
+                   and '🎬' in item['content_data'].content_type
+                   and item['preview_url']]  # Only cache if we have a preview URL
     
     if video_items:
-        logger.info(f"🔄 Dispatching {len(video_items)} video tasks to Celery queue (skipping {len(results) - len(video_items)} images)")
-    else:
-        logger.info(f"ℹ️ No video tasks to dispatch (all {len(results)} items are images or other content)")
-    
-    try:
-        from services.celery_tasks import cache_and_store_task
+        logger.info(f"🔄 Dispatching {len(video_items)} video caching tasks (skipping {len(results) - len(video_items)} non-video items)")
         
+        # Start background image caching tasks
         for item in video_items:
-            # Convert content_data to dict for Celery serialization
-            content_dict = {
-                'creator_name': item['content_data'].creator_name,
-                'content_title': item['content_data'].content_title,
-                'content_type': item['content_data'].content_type,
-                'original_url': item['content_data'].original_url,
-                'thumbnail_url': item['content_data'].thumbnail_url,
-            }
-            
-            # Dispatch task to Celery (async, queued in RabbitMQ)
-            cache_and_store_task.delay(
-                short_id=item['short_id'],
-                content_data=content_dict,
-                expires_at=item['expires_at'].isoformat(),
-                preview_url=item['preview_url']
-            )
-        
-        if video_items:
-            logger.info(f"✅ Dispatched {len(video_items)} video tasks to Celery")
-    except Exception as e:
-        logger.error(f"❌ Failed to dispatch Celery tasks: {e}")
-        # Fallback: tasks will be lost, but API response still works
+            asyncio.create_task(_background_cache_preview_image(item['short_id'], item['preview_url']))
+    else:
+        logger.info(f"ℹ️ No video caching tasks needed (all {len(results)} items are images or have no preview)")
     
     total_time = time.time() - batch_start
     logger.info(f"✅ Batch completed: {len(results)}/{len(content_items)} items in {total_time:.2f}s")
