@@ -176,9 +176,12 @@ def generate_signed_url(content_data: Dict[str, Any], expires_hours: int = 24) -
 def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
     """Verify and retrieve data for a short URL"""
     try:
+        logger.info(f"🔍 Verifying short URL: {short_id}")
+        
         # First check in-memory storage
         data_dict = url_storage.get(short_id)
         if data_dict:
+            logger.info(f"📥 Found {short_id} in memory storage")
             # Check expiration - use UTC for consistency
             expires_at = datetime.fromisoformat(data_dict['expires'])
             # Ensure we're comparing timezone-aware datetimes
@@ -191,7 +194,10 @@ def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
                 del url_storage[short_id]
                 logger.info(f"🗑️ Cleaned up expired link: {short_id}")
                 return None
+            logger.info(f"✅ Valid link found in memory: {short_id}")
             return data_dict
+        
+        logger.info(f"🔍 Not found in memory, checking database for: {short_id}")
         
         # If not in memory, try to load from Supabase
         try:
@@ -202,6 +208,7 @@ def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
             try:
                 landing_page = crud.get_landing_page(db, short_id)
                 if landing_page:
+                    logger.info(f"📥 Found {short_id} in database")
                     # Ensure consistent timezone handling
                     current_time = datetime.now(timezone.utc)
                     expires_at = landing_page.expires_at
@@ -220,19 +227,22 @@ def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
                             'expires': expires_at.isoformat()
                         }
                         url_storage[short_id] = data_dict
-                        logger.info(f"📥 Loaded link from database: {short_id}")
+                        logger.info(f"✅ Loaded valid link from database: {short_id}")
                         return data_dict
                     else:
                         logger.info(f"🗑️ Found expired link in database: {short_id}")
+                else:
+                    logger.warning(f"❌ Short URL not found in database: {short_id}")
             finally:
                 db.close()
         except Exception as e:
-            logger.error(f"Failed to load from Supabase: {e}")
+            logger.error(f"❌ Failed to load from Supabase for {short_id}: {e}")
         
+        logger.warning(f"❌ Short URL verification failed: {short_id}")
         return None
         
     except Exception as e:
-        logger.error(f"Error in verify_short_url: {e}")
+        logger.error(f"❌ Error in verify_short_url for {short_id}: {e}")
         return None
 
 @app.get("/", response_class=HTMLResponse)
@@ -247,10 +257,17 @@ async def content_landing(
 ):
     """Content landing page with preview - now with short URLs"""
     
+    logger.info(f"🔗 Content landing request for short_id: {short_id}")
+    logger.info(f"📍 Request from: {request.client.host if request.client else 'unknown'}")
+    logger.info(f"🌐 User-Agent: {request.headers.get('user-agent', 'unknown')}")
+    
     # Verify the short URL and get content data
     content_data = verify_short_url(short_id)
     if not content_data:
+        logger.error(f"❌ Invalid or expired link requested: {short_id}")
         raise HTTPException(status_code=404, detail="Invalid or expired link")
+    
+    logger.info(f"✅ Valid content found for {short_id}: {content_data['creator']} - {content_data['title']}")
     
     # Extract content information
     creator_name = content_data['creator']
@@ -266,6 +283,8 @@ async def content_landing(
     
     # Use preview or thumbnail for Open Graph
     og_image = preview_url or thumbnail_url or ""
+    
+    logger.info(f"🎨 Rendering landing page for {short_id} (video: {is_video}, photo: {is_photo})")
     
     return templates.TemplateResponse("content_landing.html", {
         "request": request,
@@ -356,10 +375,43 @@ async def test_no_preview_content(request: Request):
         "og_description": "View Premium content from MysteryCreator"
     })
 
-@app.get("/test/home")
-async def test_home_page(request: Request):
-    """Test home page"""
-    return templates.TemplateResponse("home.html", {"request": request})
+@app.get("/debug/storage")
+async def debug_storage():
+    """Debug endpoint to check URL storage"""
+    return {
+        "memory_storage_count": len(url_storage),
+        "memory_storage_keys": list(url_storage.keys()),
+        "db_initialized": db_initialized,
+        "base_url": config('LANDING_BASE_URL', default='http://localhost:8001')
+    }
+
+@app.get("/test/simple")
+async def test_simple_landing(request: Request):
+    """Simple test endpoint to verify landing server is working"""
+    
+    # Create a test short_id and store it in memory
+    test_short_id = "test123"
+    test_data = {
+        'creator': 'Test Creator',
+        'title': 'Test Content',
+        'type': '🖼️ Photo Set',
+        'url': 'https://example.com/test',
+        'preview': None,
+        'thumbnail': None,
+        'expires': (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    }
+    
+    # Store in memory
+    url_storage[test_short_id] = test_data
+    
+    logger.info(f"✅ Created test landing page: /c/{test_short_id}")
+    
+    return {
+        "message": "Test landing page created",
+        "test_url": f"/c/{test_short_id}",
+        "full_url": f"{config('LANDING_BASE_URL', default='http://localhost:8001')}/c/{test_short_id}",
+        "data": test_data
+    }
 
 @app.get("/health")
 async def health_check():

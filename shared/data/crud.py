@@ -5,7 +5,7 @@ Provides reusable functions for Create, Read, Update, Delete operations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
@@ -29,7 +29,7 @@ def create_creator(db: Session, name: str, content: Dict[str, Any]) -> Creator:
             name=name,
             content=json.dumps(content),
             post_count=post_count,
-            last_scraped=datetime.utcnow()
+            last_scraped=datetime.now(timezone.utc)
         )
         db.add(creator)
         db.commit()
@@ -62,8 +62,8 @@ def update_creator_content(db: Session, name: str, content: Dict[str, Any]) -> O
             
             creator.content = json.dumps(content)
             creator.post_count = post_count
-            creator.last_scraped = datetime.utcnow()
-            creator.updated_at = datetime.utcnow()
+            creator.last_scraped = datetime.now(timezone.utc)
+            creator.updated_at = datetime.now(timezone.utc)
             db.commit()
             db.refresh(creator)
             logger.info(f"✓ Updated creator content for {name} ({post_count} items)")
@@ -164,7 +164,7 @@ def delete_video_from_creator(db: Session, video_url: str) -> bool:
                         # Update creator with filtered content
                         creator.content = json.dumps(content)
                         creator.post_count = len(filtered_items)
-                        creator.updated_at = datetime.utcnow()
+                        creator.updated_at = datetime.now(timezone.utc)
                         logger.info(f"✓ Removed video from creator {creator.name} ({original_count} → {len(filtered_items)} items)")
                         video_deleted = True
                         
@@ -192,7 +192,7 @@ def get_all_creators(db: Session) -> List[Creator]:
 def get_stale_creators(db: Session, max_age_hours: int = 24) -> List[Creator]:
     """Get creators that need to be refreshed (older than max_age_hours)."""
     try:
-        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
         
         stale_creators = db.query(Creator).filter(
             Creator.last_scraped < cutoff_time
@@ -262,7 +262,7 @@ def get_onlyfans_posts(db: Session, username: str, max_age_hours: int = 24) -> O
     try:
         # Check if we have recent posts - handle timezone issues
         from datetime import timezone
-        cutoff_time = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=max_age_hours)
+        cutoff_time = datetime.now(timezone.utc).replace(tzinfo=timezone.utc) - timedelta(hours=max_age_hours)
         
         posts = db.query(OnlyFansPost).filter(
             OnlyFansPost.username == username,
@@ -380,7 +380,7 @@ def get_creators_needing_refresh(db: Session, creator_names: List[str], max_age_
         List of creator names that need refresh
     """
     try:
-        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
         stale_names = []
         
         # Process in batches
@@ -436,7 +436,7 @@ def create_landing_page(db: Session, short_id: str, creator: str, title: str,
     """Create a new landing page record."""
     try:
         if expires_at is None:
-            expires_at = datetime.utcnow() + timedelta(hours=24)
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
         
         landing_page = LandingPage(
             short_id=short_id,
@@ -464,7 +464,7 @@ def upsert_landing_page(db: Session, short_id: str, creator: str, title: str,
     """Create or update a landing page record (upsert)."""
     try:
         if expires_at is None:
-            expires_at = datetime.utcnow() + timedelta(hours=24)
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
         
         # Check if record already exists
         existing = db.query(LandingPage).filter(LandingPage.short_id == short_id).first()
@@ -478,7 +478,7 @@ def upsert_landing_page(db: Session, short_id: str, creator: str, title: str,
             existing.preview_url = preview_url
             existing.thumbnail_url = thumbnail_url
             existing.expires_at = expires_at
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = datetime.now(timezone.utc)
             db.commit()
             db.refresh(existing)
             logger.info(f"✓ Updated landing page record for {short_id}")
@@ -508,7 +508,8 @@ def upsert_landing_page(db: Session, short_id: str, creator: str, title: str,
 def get_landing_page(db: Session, short_id: str) -> Optional[LandingPage]:
     """Get landing page by short_id if not expired."""
     try:
-        now = datetime.utcnow()
+        # Use timezone-aware datetime for consistency
+        now = datetime.now(timezone.utc)
         landing_page = db.query(LandingPage).filter(
             LandingPage.short_id == short_id,
             LandingPage.expires_at > now
@@ -526,7 +527,7 @@ def update_landing_page(db: Session, short_id: str, **kwargs) -> Optional[Landin
             for key, value in kwargs.items():
                 if hasattr(landing_page, key):
                     setattr(landing_page, key, value)
-            landing_page.updated_at = datetime.utcnow()
+            landing_page.updated_at = datetime.now(timezone.utc)
             db.commit()
             db.refresh(landing_page)
             logger.info(f"✓ Updated landing page {short_id}")
@@ -555,7 +556,7 @@ def delete_landing_page(db: Session, short_id: str) -> bool:
 def cleanup_expired_landing_pages(db: Session) -> int:
     """Remove expired landing pages from the database."""
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired_pages = db.query(LandingPage).filter(LandingPage.expires_at <= now).all()
         count = len(expired_pages)
         
@@ -576,10 +577,10 @@ def cleanup_expired_landing_pages(db: Session) -> int:
 def get_landing_pages_by_creator(db: Session, creator: str, max_age_hours: int = 24) -> List[LandingPage]:
     """Get all non-expired landing pages for a creator."""
     try:
-        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
         pages = db.query(LandingPage).filter(
             LandingPage.creator == creator,
-            LandingPage.expires_at > datetime.utcnow(),
+            LandingPage.expires_at > datetime.now(timezone.utc),
             LandingPage.created_at >= cutoff_time
         ).order_by(desc(LandingPage.created_at)).all()
         return pages
@@ -591,7 +592,7 @@ def get_recent_landing_pages(db: Session, cutoff_time: datetime) -> List[Landing
     """Get all non-expired landing pages created after cutoff_time."""
     try:
         pages = db.query(LandingPage).filter(
-            LandingPage.expires_at > datetime.utcnow(),
+            LandingPage.expires_at > datetime.now(timezone.utc),
             LandingPage.created_at >= cutoff_time
         ).order_by(desc(LandingPage.created_at)).all()
         return pages
@@ -712,7 +713,7 @@ def get_active_pools(db: Session, limit: int = 10, creator_filter: str = None) -
     try:
         query = db.query(ContentPool).filter(
             ContentPool.status == 'active',
-            ContentPool.expires_at > datetime.utcnow()
+            ContentPool.expires_at > datetime.now(timezone.utc)
         )
         
         if creator_filter:
@@ -738,7 +739,7 @@ def update_pool_progress(db: Session, pool_id: str, amount_added: int) -> Option
         # Check if pool is completed
         if pool.current_amount >= pool.total_cost:
             pool.status = 'completed'
-            pool.completed_at = datetime.utcnow()
+            pool.completed_at = datetime.now(timezone.utc)
         
         db.commit()
         db.refresh(pool)
@@ -757,7 +758,7 @@ def complete_pool(db: Session, pool_id: str, content_url: str, landing_page_id: 
             return False
         
         pool.status = 'completed'
-        pool.completed_at = datetime.utcnow()
+        pool.completed_at = datetime.now(timezone.utc)
         pool.content_url = content_url
         if landing_page_id:
             pool.landing_page_id = landing_page_id
@@ -886,7 +887,7 @@ def get_user_transactions(db: Session, user_id: int, limit: int = 10) -> List[Tr
 def cleanup_expired_pools(db: Session) -> int:
     """Clean up expired pools and process refunds."""
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired_pools = db.query(ContentPool).filter(
             ContentPool.status == 'active',
             ContentPool.expires_at < now
