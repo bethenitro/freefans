@@ -36,7 +36,7 @@ from bot.channel_handlers import (
     list_required_channels_command, channel_settings_command,
     handle_channel_callback, set_welcome_message_command,
     set_membership_message_command, channel_diagnostics_command,
-    test_user_channels_command
+    test_user_channels_command, fix_channel_links_command
 )
 from bot.channel_middleware import handle_check_membership_callback
 from managers.cache_factory import get_cache_manager
@@ -160,8 +160,16 @@ class FreeFansBot:
                     channel_link = channel.get('channel_link')
                     
                     # Only add button if we have a valid link
-                    if channel_link and channel_link != '#':
+                    if channel_link and channel_link.startswith(('http://', 'https://', 't.me/')):
+                        # Ensure proper URL format
+                        if channel_link.startswith('t.me/'):
+                            channel_link = 'https://' + channel_link
                         keyboard.append([InlineKeyboardButton(f"📢 Join {channel_name}", url=channel_link)])
+                    else:
+                        # If no valid link, create a search button instead
+                        search_query = channel.get('channel_id', '').replace('@', '')
+                        if search_query:
+                            keyboard.append([InlineKeyboardButton(f"🔍 Find {channel_name}", url=f"https://t.me/{search_query}")])
                 
                 # Add check membership button
                 keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_membership")])
@@ -533,6 +541,7 @@ def main():
     # Channel diagnostic commands (admin only)
     application.add_handler(CommandHandler("channeldiagnostics", create_channel_protected_handler(channel_diagnostics_command)))
     application.add_handler(CommandHandler("testchannels", create_channel_protected_handler(test_user_channels_command)))
+    application.add_handler(CommandHandler("fixchannellinks", create_channel_protected_handler(fix_channel_links_command)))
     
     # Pool commands with channel protection
     async def pools_command_wrapper(update, context):

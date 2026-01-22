@@ -44,8 +44,19 @@ def require_channel_membership(func):
                 keyboard = []
                 for channel in missing_channels[:5]:  # Limit to 5 buttons
                     channel_name = channel.get('channel_name', 'Join Channel')
-                    channel_link = channel.get('channel_link', '#')
-                    keyboard.append([InlineKeyboardButton(f"📢 Join {channel_name}", url=channel_link)])
+                    channel_link = channel.get('channel_link')
+                    
+                    # Only add button if we have a valid link
+                    if channel_link and channel_link.startswith(('http://', 'https://', 't.me/')):
+                        # Ensure proper URL format
+                        if channel_link.startswith('t.me/'):
+                            channel_link = 'https://' + channel_link
+                        keyboard.append([InlineKeyboardButton(f"📢 Join {channel_name}", url=channel_link)])
+                    else:
+                        # If no valid link, create a search button instead
+                        search_query = channel.get('channel_id', '').replace('@', '')
+                        if search_query:
+                            keyboard.append([InlineKeyboardButton(f"🔍 Find {channel_name}", url=f"https://t.me/{search_query}")])
                 
                 # Add check membership button
                 keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_membership")])
@@ -115,8 +126,19 @@ async def handle_check_membership_callback(update: Update, context: ContextTypes
             keyboard = []
             for channel in missing_channels[:5]:
                 channel_name = channel.get('channel_name', 'Join Channel')
-                channel_link = channel.get('channel_link', '#')
-                keyboard.append([InlineKeyboardButton(f"📢 Join {channel_name}", url=channel_link)])
+                channel_link = channel.get('channel_link')
+                
+                # Only add button if we have a valid link
+                if channel_link and channel_link.startswith(('http://', 'https://', 't.me/')):
+                    # Ensure proper URL format
+                    if channel_link.startswith('t.me/'):
+                        channel_link = 'https://' + channel_link
+                    keyboard.append([InlineKeyboardButton(f"📢 Join {channel_name}", url=channel_link)])
+                else:
+                    # If no valid link, create a search button instead
+                    search_query = channel.get('channel_id', '').replace('@', '')
+                    if search_query:
+                        keyboard.append([InlineKeyboardButton(f"🔍 Find {channel_name}", url=f"https://t.me/{search_query}")])
             
             keyboard.append([InlineKeyboardButton("✅ Check Again", callback_data="check_membership")])
             

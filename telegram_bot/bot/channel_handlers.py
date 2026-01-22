@@ -645,3 +645,36 @@ async def set_membership_message_command(update: Update, context: ContextTypes.D
     except Exception as e:
         logger.error(f"Error setting membership message: {e}")
         await update.message.reply_text("❌ Error updating message.")
+
+async def fix_channel_links_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fix invalid channel links (admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    if not permissions.is_admin(user_id):
+        await update.message.reply_text("❌ This command is for admins only.")
+        return
+    
+    try:
+        channel_manager = get_channel_manager()
+        
+        # Validate and fix links
+        updated = channel_manager.validate_channel_links()
+        
+        if updated:
+            await update.message.reply_text(
+                "✅ **Channel Links Fixed!**\n\n"
+                "Invalid channel links have been automatically corrected.\n"
+                "Use `/listrequiredchannels` to see the updated configuration.",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                "✅ **All Channel Links Valid**\n\n"
+                "No issues found with channel links.",
+                parse_mode='Markdown'
+            )
+            
+    except Exception as e:
+        logger.error(f"Error fixing channel links: {e}")
+        await update.message.reply_text("❌ Error fixing channel links.")

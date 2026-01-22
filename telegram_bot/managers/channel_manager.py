@@ -261,10 +261,48 @@ class ChannelManager:
         
         return message
     
-    def get_welcome_message(self) -> str:
-        """Get welcome message for new users."""
-        config = self._get_full_config()
-        return config.get('welcome_message', 'Welcome! To use this bot, please join our required channels first.')
+    def reload_channels(self):
+        """Reload channels from config file."""
+        try:
+            self.required_channels = self._load_channels()
+            logger.info(f"Reloaded {len(self.required_channels)} channels from config")
+            return True
+        except Exception as e:
+            logger.error(f"Error reloading channels: {e}")
+            return False
+    
+    def validate_channel_links(self):
+        """Validate and fix channel links."""
+        try:
+            config = self._get_full_config()
+            updated = False
+            
+            for channel in config['channels']:
+                channel_link = channel.get('channel_link', '')
+                channel_id = channel.get('channel_id', '')
+                
+                # Fix invalid links
+                if channel_link and not channel_link.startswith(('http://', 'https://', 't.me/')):
+                    if channel_id.startswith('@'):
+                        new_link = f"https://t.me/{channel_id[1:]}"
+                        channel['channel_link'] = new_link
+                        updated = True
+                        logger.info(f"Fixed invalid link for {channel_id}: {channel_link} -> {new_link}")
+                    else:
+                        channel['channel_link'] = ""
+                        updated = True
+                        logger.info(f"Removed invalid link for {channel_id}: {channel_link}")
+            
+            if updated:
+                self._save_channels(config)
+                self.required_channels = config['channels']
+                logger.info("Channel links validated and updated")
+            
+            return updated
+            
+        except Exception as e:
+            logger.error(f"Error validating channel links: {e}")
+            return False
 
 
 # Global instance
@@ -276,3 +314,7 @@ def get_channel_manager() -> ChannelManager:
     if _channel_manager is None:
         _channel_manager = ChannelManager()
     return _channel_manager
+    def get_welcome_message(self) -> str:
+        """Get welcome message for new users."""
+        config = self._get_full_config()
+        return config.get('welcome_message', 'Welcome! To use this bot, please join our required channels first.')
