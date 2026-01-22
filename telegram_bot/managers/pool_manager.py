@@ -554,6 +554,44 @@ class PoolManager:
             logger.error(f"Error getting user contributions for {user_id}: {e}")
             return []
     
+    def get_pool_contributors(self, pool_id: str) -> List[Dict]:
+        """
+        Get all contributors for a specific pool.
+        
+        Args:
+            pool_id: Pool ID to get contributors for
+            
+        Returns:
+            List of contributor data dicts
+        """
+        try:
+            db = get_db_session_sync()
+            try:
+                contributions = db.query(PoolContribution).filter(
+                    and_(
+                        PoolContribution.pool_id == pool_id,
+                        PoolContribution.status == 'completed'
+                    )
+                ).all()
+                
+                result = []
+                for contribution in contributions:
+                    result.append({
+                        'user_id': contribution.user_id,
+                        'amount': contribution.amount,
+                        'contributed_at': contribution.contributed_at,
+                        'transaction_id': contribution.transaction_id
+                    })
+                
+                return result
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"Error getting pool contributors for {pool_id}: {e}")
+            return []
+    
     def complete_pool(self, pool_id: str, content_url: str, landing_page_id: str = None) -> bool:
         """
         Mark a pool as completed and set content URL.

@@ -41,20 +41,56 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
         return
     
     try:
+        # Check for existing pools for this creator first
+        from managers.pool_manager import get_pool_manager
+        pool_manager = get_pool_manager()
+        existing_pools = pool_manager.get_active_pools(limit=5, creator_filter=creator_name)
+        
         # Check if we need to show multiple options or proceed directly
         search_options = await bot_instance.content_manager.search_creator_options(creator_name)
         
+        # If no content found but there are active pools, show pools
+        if not search_options and existing_pools:
+            await show_existing_pools_for_creator(search_message, creator_name, existing_pools)
+            return
+        
+        # If both content and pools exist, show content first with pool option
+        if search_options and existing_pools:
+            # Store pools in session for later access
+            session.existing_pools = existing_pools
+        
         if not search_options:
+            # No content and no pools
             try:
-                await send_message_with_retry(
-                    search_message.edit_text,
-                    f"😔 No content found for '{creator_name}'\n\n"
-                    f"Try this:\n"
-                    f"• Double-check the spelling\n"
-                    f"• Try a different name or alias\n"
-                    f"• Search for another creator\n\n"
-                    f"We're always adding new content, so check back soon! 💋"
-                )
+                message_text = f"😔 No content found for '{creator_name}'\n\n"
+                message_text += f"Try this:\n"
+                message_text += f"• Double-check the spelling\n"
+                message_text += f"• Try a different name or alias\n"
+                message_text += f"• Search for another creator\n\n"
+                
+                # Check if there are any pools for similar names
+                similar_pools = pool_manager.get_active_pools(limit=3)
+                if similar_pools:
+                    message_text += f"💡 Or check out these active community pools:\n"
+                    keyboard = []
+                    for pool in similar_pools[:3]:
+                        pool_text = f"🏊‍♀️ {pool['creator_name']} - {pool['content_title'][:30]}..."
+                        keyboard.append([InlineKeyboardButton(pool_text, callback_data=f"view_pool_{pool['pool_id']}")])
+                    
+                    keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    await send_message_with_retry(
+                        search_message.edit_text,
+                        message_text,
+                        reply_markup=reply_markup
+                    )
+                else:
+                    message_text += f"We're always adding new content, so check back soon! 💋"
+                    await send_message_with_retry(
+                        search_message.edit_text,
+                        message_text
+                    )
             except (TimedOut, NetworkError):
                 pass
             return
@@ -83,6 +119,50 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
             )
         except (TimedOut, NetworkError):
             pass
+
+
+async def show_existing_pools_for_creator(message, creator_name: str, pools: List[Dict]):
+    """Show existing pools for a creator when no content is found."""
+    try:
+        text = f"🏊‍♀️ **Community Pools for {creator_name}**\n\n"
+        text += f"No direct content found, but there are active community pools!\n\n"
+        text += f"💡 **Join a pool to get content when it's unlocked:**\n\n"
+        
+        keyboard = []
+        
+        for i, pool in enumerate(pools[:5], 1):
+            completion = pool['completion_percentage']
+            price = pool['current_price_per_user']
+            
+            pool_text = f"**{i}. {pool['content_title'][:40]}{'...' if len(pool['content_title']) > 40 else ''}**\n"
+            pool_text += f"💰 Current Price: {price} ⭐\n"
+            pool_text += f"📊 Progress: {completion:.1f}%\n"
+            
+            if i < len(pools):
+                pool_text += "\n"
+            
+            text += pool_text
+            
+            # Add button for each pool
+            button_text = f"🏊‍♀️ Join Pool {i} ({price} ⭐)"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{pool['pool_id']}")])
+        
+        # Add navigation buttons
+        keyboard.append([InlineKeyboardButton("🔍 Search Different Creator", callback_data="search_creator")])
+        keyboard.append([InlineKeyboardButton("🏊‍♀️ Browse All Pools", callback_data="pools_menu")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await send_message_with_retry(
+            message.edit_text,
+            text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"Error showing existing pools: {e}")
+        await message.edit_text("❌ Error loading pools. Please try again.")
 
 
 async def display_content_directory(update: Update, bot_instance, content_directory: dict, creator_name: str) -> None:
@@ -206,6 +286,11 @@ async def display_creator_selection_page(message, session, page: int = 0):
     # Add "Extended Search" button for CSV results (not for SimpCity results)
     if not is_simpcity:
         keyboard.append([InlineKeyboardButton("🔍 Not found? Search More", callback_data="search_on_simpcity")])
+    
+    # Add existing pools button if there are pools for this creator
+    if hasattr(session, 'existing_pools') and session.existing_pools:
+        pool_count = len(session.existing_pools)
+        keyboard.append([InlineKeyboardButton(f"🏊‍♀️ View {pool_count} Active Pool{'s' if pool_count > 1 else ''}", callback_data="show_creator_pools")])
     
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="search_creator")])
     reply_markup = InlineKeyboardMarkup(keyboard)

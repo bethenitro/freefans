@@ -105,7 +105,7 @@ The bot includes a channel membership verification system that requires users to
 - `/poolstats` - View pool system statistics and metrics
 - `/createpool request <request_id> <total_cost>` - Create pool from existing request
 - `/createpool manual <creator> <title> <type> <total_cost> [description]` - Create manual pool
-- `/completepool <pool_id> <content_url>` - Mark pool as completed and deliver content
+- `/completepool <pool_id> <content_url>` - Mark pool as completed and automatically deliver content to all contributors
 - `/cancelpool <pool_id> [reason]` - Cancel pool and refund all contributors
 
 #### Channel Management System
@@ -143,12 +143,12 @@ All other commands are available including:
 
 The community pooling system uses dynamic pricing where the cost per user decreases as more people join:
 
-**Example: 100 Star Pool (Max 50 Contributors)**
+**Example: 100 Star Pool**
 - 1st person: ~25 Stars (early adopter price)
 - 5th person: ~15 Stars (price dropping)
 - 10th person: ~8 Stars (getting cheaper)
 - 25th person: ~4 Stars (much cheaper)
-- 50th person: ~2 Stars (minimum price)
+- Final contributors: ~2 Stars (minimum price)
 
 ### 📋 **Pool Creation Workflow**
 
@@ -189,12 +189,26 @@ Users interact with pools through:
 - **Menu Button**: `🏊‍♀️ Community Pools`
 - **Command**: `/pools`
 - **Balance Check**: `/balance`
+- **Smart Discovery**: When searching for creators, existing pools are automatically suggested
+
+### 🔍 **Pool Discovery Features**
+
+**Automatic Pool Suggestions:**
+- When users search for creators with no direct content, existing pools are shown
+- Users can join pools directly from search results
+- Pool information includes current price and progress (contributor counts hidden for privacy)
+
+**Content Delivery:**
+- When admins complete pools with `/completepool`, content is automatically delivered to all contributors
+- Each contributor receives a personalized message with their contribution amount
+- Content URLs are sent directly to contributors' private messages
 
 Each pool shows:
 - Current price per person (dynamic)
 - How price decreases with more contributors
 - Progress toward completion
 - Time remaining before expiration
+- **Note:** Contributor counts are hidden from users for privacy
 
 ## Setup
 

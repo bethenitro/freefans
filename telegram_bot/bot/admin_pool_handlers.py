@@ -347,6 +347,9 @@ Usage: `/completepool <pool_id> <content_url>`
             success = self.pool_manager.complete_pool(pool_id, content_url)
             
             if success:
+                # Send content to all contributors automatically
+                await self._deliver_content_to_contributors(pool_id, content_url, context)
+                
                 text = f"✅ **Pool Completed Successfully!**\n\n"
                 text += f"🆔 **Pool ID:** `{pool_id}`\n"
                 text += f"👤 **Creator:** {pool['creator_name']}\n"
@@ -354,7 +357,7 @@ Usage: `/completepool <pool_id> <content_url>`
                 text += f"💰 **Final Amount:** {pool['current_amount']}/{pool['total_cost']} ⭐\n"
                 text += f"👥 **Contributors:** {pool['contributors_count']}\n"
                 text += f"🔗 **Content URL:** {content_url}\n\n"
-                text += f"🎉 All contributors now have access to the content!"
+                text += f"🎉 Content automatically delivered to all contributors!"
                 
                 await update.message.reply_text(text, parse_mode='Markdown')
             else:
@@ -541,6 +544,69 @@ Usage: `/cancelpool <pool_id> [reason]`
         except Exception as e:
             logger.error(f"Error in admin cleanup callback: {e}")
             await query.edit_message_text("❌ Error during cleanup.")
+    
+    async def _deliver_content_to_contributors(self, pool_id: str, content_url: str, context: ContextTypes.DEFAULT_TYPE):
+        """Automatically deliver content to all pool contributors."""
+        try:
+            # Get all contributors for this pool
+            contributors = self.pool_manager.get_pool_contributors(pool_id)
+            
+            if not contributors:
+                logger.warning(f"No contributors found for pool {pool_id}")
+                return
+            
+            # Get pool details for the message
+            pool = self.pool_manager.get_pool(pool_id)
+            if not pool:
+                logger.error(f"Pool {pool_id} not found when delivering content")
+                return
+            
+            # Prepare the delivery message
+            message_text = f"🎉 **Pool Content Delivered!**\n\n"
+            message_text += f"👤 **Creator:** {pool['creator_name']}\n"
+            message_text += f"📝 **Title:** {pool['content_title']}\n"
+            message_text += f"💰 **Your Contribution:** {contributors[0].get('amount', 'N/A')} ⭐\n\n"
+            message_text += f"🔗 **Access Your Content:**\n{content_url}\n\n"
+            message_text += f"Thank you for participating in the community pool! 💖"
+            
+            # Send to each contributor
+            delivered_count = 0
+            failed_count = 0
+            
+            for contributor in contributors:
+                try:
+                    user_id = contributor.get('user_id')
+                    if not user_id:
+                        continue
+                    
+                    # Personalize the message with their contribution amount
+                    personal_message = message_text.replace(
+                        f"💰 **Your Contribution:** {contributors[0].get('amount', 'N/A')} ⭐",
+                        f"💰 **Your Contribution:** {contributor.get('amount', 'N/A')} ⭐"
+                    )
+                    
+                    # Send the content to the contributor
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=personal_message,
+                        parse_mode='Markdown'
+                    )
+                    
+                    delivered_count += 1
+                    logger.info(f"Delivered content to contributor {user_id} for pool {pool_id}")
+                    
+                    # Small delay to avoid rate limiting
+                    import asyncio
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"Failed to deliver content to contributor {user_id}: {e}")
+            
+            logger.info(f"Content delivery complete for pool {pool_id}: {delivered_count} delivered, {failed_count} failed")
+            
+        except Exception as e:
+            logger.error(f"Error delivering content to contributors for pool {pool_id}: {e}")
 
 
 # Global instance

@@ -107,6 +107,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await handle_search_creator(query, session)
     elif data == "search_on_simpcity":
         await handle_search_on_simpcity(query, session, bot_instance)
+    elif data == "show_creator_pools":
+        await handle_show_creator_pools(query, session)
+    elif data == "back_to_creator_selection":
+        await handle_back_to_creator_selection(query, session)
     elif data.startswith("creator_page|"):
         await handle_creator_page_change(query, session, data)
     elif data.startswith("select_creator|"):
@@ -233,6 +237,88 @@ async def handle_search_on_simpcity(query, session, bot_instance) -> None:
         await query.edit_message_text(
             "⚠️ Server issue - please try again later."
         )
+
+async def handle_show_creator_pools(query, session) -> None:
+    """Handle showing existing pools for a creator."""
+    try:
+        if not hasattr(session, 'existing_pools') or not session.existing_pools:
+            await query.edit_message_text("❌ No pools found. Please try a new search.")
+            return
+        
+        creator_name = getattr(session, 'pending_creator_name', 'this creator')
+        pools = session.existing_pools
+        
+        text = f"🏊‍♀️ **Active Pools for {creator_name}**\n\n"
+        text += f"Join a community pool to get content when it's unlocked!\n\n"
+        
+        keyboard = []
+        
+        for i, pool in enumerate(pools[:5], 1):
+            completion = pool['completion_percentage']
+            price = pool['current_price_per_user']
+            
+            # Pool details
+            pool_text = f"**{i}. {pool['content_title'][:50]}{'...' if len(pool['content_title']) > 50 else ''}**\n"
+            pool_text += f"💰 Current Price: {price} ⭐ (decreases as more join!)\n"
+            pool_text += f"📊 Progress: {completion:.1f}%\n"
+            
+            # Time remaining
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            expires_at = pool['expires_at']
+            if isinstance(expires_at, str):
+                from datetime import datetime
+                expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            
+            time_left = expires_at - now
+            if time_left.days > 0:
+                pool_text += f"⏰ {time_left.days} days left\n"
+            elif time_left.seconds > 3600:
+                hours = time_left.seconds // 3600
+                pool_text += f"⏰ {hours} hours left\n"
+            else:
+                pool_text += f"⏰ Expires soon!\n"
+            
+            if i < len(pools):
+                pool_text += "\n"
+            
+            text += pool_text
+            
+            # Add button for each pool
+            button_text = f"🏊‍♀️ Join Pool {i} ({price} ⭐)"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{pool['pool_id']}")])
+        
+        # Navigation buttons
+        keyboard.append([InlineKeyboardButton("🔙 Back to Search Results", callback_data="back_to_creator_selection")])
+        keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"Error showing creator pools: {e}")
+        await query.edit_message_text("❌ Error loading pools. Please try again.")
+
+async def handle_back_to_creator_selection(query, session) -> None:
+    """Handle going back to creator selection from pools view."""
+    try:
+        if not hasattr(session, 'pending_creator_options') or not session.pending_creator_options:
+            await query.edit_message_text("❌ No search results to return to. Please start a new search.")
+            return
+        
+        # Return to the creator selection page
+        from bot.search_handler import display_creator_selection_page
+        page = getattr(session, 'creator_selection_page', 0)
+        await display_creator_selection_page(query.message, session, page)
+        
+    except Exception as e:
+        logger.error(f"Error returning to creator selection: {e}")
+        await query.edit_message_text("❌ Error returning to search. Please try again.")
 
 async def handle_creator_page_change(query, session, data: str) -> None:
     """Handle pagination for creator selection."""

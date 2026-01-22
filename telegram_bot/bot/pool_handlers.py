@@ -62,7 +62,6 @@ No active pools right now!
                 text += f"**{i}. {pool['creator_name']}**\n"
                 text += f"📝 {pool['content_title']}\n"
                 text += f"💰 {pool['current_amount']}/{pool['total_cost']} ⭐ ({progress:.1f}%)\n"
-                text += f"👥 {pool['contributors_count']} contributors\n"
                 text += f"{progress_bar}\n"
                 
                 # Calculate days remaining
@@ -160,8 +159,7 @@ No active pools right now!
         text += f"🎯 **Type:** {pool['content_type'].replace('_', ' ').title()}\n\n"
         
         text += f"💰 **Progress:** {pool['current_amount']}/{pool['total_cost']} ⭐ ({progress:.1f}%)\n"
-        text += f"{progress_bar}\n"
-        text += f"👥 **Contributors:** {pool['contributors_count']}/{pool['max_contributors']}\n\n"
+        text += f"{progress_bar}\n\n"
         
         # Show current price and how it changes
         current_price = pool['current_price_per_user']
@@ -175,12 +173,12 @@ No active pools right now!
             # Show how price decreases with more contributors
             text += f"📊 **Price gets cheaper as more join:**\n"
             for additional in [1, 5, 10]:
-                if pool['contributors_count'] + additional <= pool['max_contributors']:
-                    future_price = self.pool_manager.calculate_dynamic_price(
-                        pool['total_cost'], 
-                        pool['contributors_count'] + additional, 
-                        pool['max_contributors']
-                    )
+                # Calculate future price without revealing current contributor count
+                future_price = self.pool_manager.calculate_dynamic_price(
+                    pool['total_cost'], 
+                    pool['contributors_count'] + additional, 
+                    pool['max_contributors']
+                )
                     text += f"• +{additional} more contributors: {future_price} ⭐ each\n"
         
         # Show expiration
@@ -195,12 +193,12 @@ No active pools right now!
         # Create keyboard
         keyboard = []
         
-        if pool['status'] == 'active' and remaining_cost > 0 and pool['contributors_count'] < pool['max_contributors']:
+        if pool['status'] == 'active' and remaining_cost > 0:
             keyboard.append([InlineKeyboardButton(f"💰 Join Pool ({current_price} ⭐)", callback_data=f"join_pool_{pool_id}")])
         elif pool['status'] == 'completed':
             keyboard.append([InlineKeyboardButton("🎉 View Content", callback_data=f"view_content_{pool_id}")])
-        elif pool['contributors_count'] >= pool['max_contributors']:
-            keyboard.append([InlineKeyboardButton("❌ Pool Full", callback_data="pool_full")])
+        elif remaining_cost <= 0:
+            keyboard.append([InlineKeyboardButton("✅ Pool Complete", callback_data="pool_complete")])
         
         keyboard.append([InlineKeyboardButton("🔙 Back to Pools", callback_data="back_to_pools")])
         
@@ -535,9 +533,9 @@ No active pools right now!
             await query.edit_message_text("❌ Pool is not available for contributions.")
             return
         
-        # Check if pool is full
+        # Check if pool is full (but don't show this to users)
         if pool['contributors_count'] >= pool['max_contributors']:
-            await query.edit_message_text("❌ Pool is full (maximum contributors reached).")
+            await query.edit_message_text("❌ Pool is currently at capacity.")
             return
         
         # Get current price
