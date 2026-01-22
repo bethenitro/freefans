@@ -220,6 +220,47 @@ class FreeFansBot:
             logger.error(f"❌ Error in universal channel check for user {user_id if 'user_id' in locals() else 'unknown'}: {e}")
             # On critical error, allow execution to prevent bot lockup
             return True
+    
+    async def _handle_creator_info_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """Handle creator info input from users."""
+        try:
+            user_id = update.effective_user.id
+            if user_id not in self.user_sessions:
+                return False
+            
+            session = self.user_sessions[user_id]
+            
+            # Check if user is in creator info input mode
+            if session.awaiting_request != 'creator_info':
+                return False
+            
+            # Get the creator name and user input
+            creator_name = getattr(session, 'request_creator_name', None)
+            if not creator_name:
+                return False
+            
+            user_input = update.message.text.strip()
+            
+            # Store the additional info
+            session.request_creator_info = user_input
+            session.awaiting_request = None  # Clear the awaiting state
+            
+            # Show confirmation
+            from bot.callback_handlers import show_creator_request_confirmation
+            
+            # Create a fake query object for the confirmation handler
+            fake_query = type('FakeQuery', (), {
+                'edit_message_text': update.message.reply_text,
+                'from_user': update.effective_user
+            })()
+            
+            await show_creator_request_confirmation(fake_query, session, creator_name)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error handling creator info input: {e}")
+            return False
 
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -299,6 +340,10 @@ class FreeFansBot:
         
         # Check if this is a worker reply to a video first
         if await handle_worker_reply(update, context, self):
+            return
+        
+        # Check if this is creator info input
+        if await self._handle_creator_info_input(update, context):
             return
         
         # Check if this is a menu button or request flow

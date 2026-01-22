@@ -115,6 +115,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await handle_request_creator_from_search(query, session, data)
     elif data.startswith("submit_creator_request_"):
         await handle_submit_creator_request(query, session, data)
+    elif data.startswith("skip_creator_info_"):
+        await handle_skip_creator_info(query, session, data)
+    elif data.startswith("confirm_submit_request_"):
+        await handle_confirm_submit_request(query, session, data)
     elif data.startswith("creator_page|"):
         await handle_creator_page_change(query, session, data)
     elif data.startswith("select_creator|"):
@@ -368,24 +372,22 @@ async def handle_request_creator_from_search(query, session, data: str) -> None:
         creator_name = data.replace("request_creator_", "")
         
         # Set up session for creator request
-        session.awaiting_request = 'creator_request'
+        session.awaiting_request = 'creator_info'
         session.request_creator_name = creator_name
         
-        # Show request form
+        # Ask for additional information first
         text = f"📝 **Request Creator: {creator_name}**\n\n"
-        text += f"You're about to request content for **{creator_name}**.\n\n"
-        text += f"**What happens next:**\n"
-        text += f"• Your request will be reviewed by admins\n"
-        text += f"• If approved, content may be added or a community pool created\n"
-        text += f"• You'll be notified when content becomes available\n\n"
-        text += f"**Please provide additional details** (optional):\n"
+        text += f"To help us find and add **{creator_name}**, please provide any additional information you have:\n\n"
+        text += f"**Helpful details:**\n"
+        text += f"• Platform (OnlyFans, Fansly, etc.)\n"
+        text += f"• Social media links (Instagram, Twitter, etc.)\n"
+        text += f"• Alternative names or aliases\n"
         text += f"• Specific content type you're looking for\n"
-        text += f"• Any aliases or alternative names\n"
-        text += f"• Platform where you've seen this creator\n\n"
-        text += f"💡 Send your message now, or click 'Submit Request' to proceed with just the name."
+        text += f"• Where you've seen this creator\n\n"
+        text += f"💡 **Send your message with any details you have**, or click 'Skip' if you only have the name."
         
         keyboard = [
-            [InlineKeyboardButton("✅ Submit Request (Name Only)", callback_data=f"submit_creator_request_{creator_name}")],
+            [InlineKeyboardButton("⏭️ Skip (Name Only)", callback_data=f"skip_creator_info_{creator_name}")],
             [InlineKeyboardButton("❌ Cancel", callback_data="search_creator")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -401,11 +403,25 @@ async def handle_request_creator_from_search(query, session, data: str) -> None:
         await query.edit_message_text("❌ Error processing request. Please try again.")
 
 async def handle_submit_creator_request(query, session, data: str) -> None:
-    """Handle submitting a creator request."""
+    """Handle submitting a creator request (legacy - redirects to new flow)."""
+    try:
+        # Extract creator name and redirect to new flow
+        creator_name = data.replace("submit_creator_request_", "")
+        await handle_request_creator_from_search(query, session, f"request_creator_{creator_name}")
+        
+    except Exception as e:
+        logger.error(f"Error in legacy submit handler: {e}")
+        await query.edit_message_text("❌ Error processing request. Please try again.")
+
+async def handle_confirm_submit_request(query, session, data: str) -> None:
+    """Handle the final submission of a creator request."""
     try:
         # Extract creator name from callback data
-        creator_name = data.replace("submit_creator_request_", "")
+        creator_name = data.replace("confirm_submit_request_", "")
         user_id = query.from_user.id
+        
+        # Get additional info from session
+        additional_info = getattr(session, 'request_creator_info', 'No additional information provided')
         
         # Submit the request
         from managers.request_manager import get_request_manager
@@ -414,7 +430,7 @@ async def handle_submit_creator_request(query, session, data: str) -> None:
         request_id = request_manager.add_creator_request(
             user_id=user_id,
             creator_name=creator_name,
-            description=f"Requested from search: {creator_name}",
+            description=f"Creator request from search.\n\nAdditional info: {additional_info}",
             request_type="creator"
         )
         
@@ -422,6 +438,7 @@ async def handle_submit_creator_request(query, session, data: str) -> None:
             text = f"✅ **Creator Request Submitted!**\n\n"
             text += f"👤 **Creator:** {creator_name}\n"
             text += f"🆔 **Request ID:** `{request_id}`\n\n"
+            text += f"**Your Info:**\n{additional_info}\n\n"
             text += f"**What's next:**\n"
             text += f"• Admins will review your request\n"
             text += f"• If approved, content may be added or a pool created\n"
@@ -447,10 +464,56 @@ async def handle_submit_creator_request(query, session, data: str) -> None:
         # Clear session state
         session.awaiting_request = None
         session.request_creator_name = None
+        session.request_creator_info = None
         
     except Exception as e:
-        logger.error(f"Error submitting creator request: {e}")
+        logger.error(f"Error confirming creator request submission: {e}")
         await query.edit_message_text("❌ Error submitting request. Please try again.")
+
+async def handle_skip_creator_info(query, session, data: str) -> None:
+    """Handle skipping creator info and proceeding with name only."""
+    try:
+        # Extract creator name from callback data
+        creator_name = data.replace("skip_creator_info_", "")
+        
+        # Set minimal info and proceed to confirmation
+        session.request_creator_info = "No additional information provided"
+        await show_creator_request_confirmation(query, session, creator_name)
+        
+    except Exception as e:
+        logger.error(f"Error skipping creator info: {e}")
+        await query.edit_message_text("❌ Error processing request. Please try again.")
+
+async def show_creator_request_confirmation(query, session, creator_name: str) -> None:
+    """Show the final confirmation before submitting the creator request."""
+    try:
+        additional_info = getattr(session, 'request_creator_info', 'No additional information provided')
+        
+        text = f"📝 **Confirm Creator Request**\n\n"
+        text += f"👤 **Creator:** {creator_name}\n"
+        text += f"📋 **Additional Info:**\n{additional_info}\n\n"
+        text += f"**What happens next:**\n"
+        text += f"• Your request will be reviewed by admins\n"
+        text += f"• If approved, content may be added or a community pool created\n"
+        text += f"• You'll be notified when content becomes available\n\n"
+        text += f"Ready to submit this request?"
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Submit Request", callback_data=f"confirm_submit_request_{creator_name}")],
+            [InlineKeyboardButton("✏️ Edit Info", callback_data=f"request_creator_{creator_name}")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="search_creator")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"Error showing creator request confirmation: {e}")
+        await query.edit_message_text("❌ Error processing request. Please try again.")
 
 async def handle_creator_page_change(query, session, data: str) -> None:
     """Handle pagination for creator selection."""
