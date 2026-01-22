@@ -65,9 +65,18 @@ No active deals right now!
                 text += f"📊 Progress: {progress:.1f}%\n"
                 text += f"{progress_bar}\n\n"
                 
-                # Add view button
+                # Add enticing view button
+                button_texts = [
+                    f"🔥 Hot Deal {i}",
+                    f"💎 VIP Access {i}",
+                    f"🌟 Premium {i}",
+                    f"💋 Exclusive {i}",
+                    f"🎯 Special {i}"
+                ]
+                
+                button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Deal {i}"
                 keyboard.append([InlineKeyboardButton(
-                    f"💎 View Deal {i}", 
+                    button_text, 
                     callback_data=f"view_pool_{deal['pool_id']}"
                 )])
             

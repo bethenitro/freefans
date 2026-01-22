@@ -233,11 +233,17 @@ async def handle_search_on_simpcity(query, session, bot_instance) -> None:
                     message_text += f"💰 Current Price: {price} ⭐\n"
                     message_text += f"📊 Progress: {completion:.1f}%\n\n"
                     
-                    # Add button for each deal
-                    button_text = f"💎 Get Deal {i} ({price} ⭐)"
+                    # Add enticing button for each deal
+                    button_texts = [
+                        f"� Get Hot Deal {i} ({price} ⭐)",
+                        f"💎 Access VIP {i} ({price} ⭐)",
+                        f"🌟 Grab Premium {i} ({price} ⭐)"
+                    ]
+                    
+                    button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Deal {i} ({price} ⭐)"
                     keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
                 
-                keyboard.append([InlineKeyboardButton("💎 View All Deals", callback_data="pools_menu")])
+                keyboard.append([InlineKeyboardButton("🔥 View All Hot Deals", callback_data="pools_menu")])
             else:
                 message_text += f"💡 **Can't find '{creator_name}'? Request them!**"
             
@@ -312,8 +318,16 @@ async def handle_show_creator_deals(query, session) -> None:
             
             text += deal_text
             
-            # Add button for each deal
-            button_text = f"💎 Get Deal {i} ({price} ⭐)"
+            # Add enticing button for each deal
+            button_texts = [
+                f"� Get Steamy {i} ({price} ⭐)",
+                f"💎 Access VIP {i} ({price} ⭐)",
+                f"🌟 Grab Premium {i} ({price} ⭐)",
+                f"💋 Get Exclusive {i} ({price} ⭐)",
+                f"🎯 Claim Special {i} ({price} ⭐)"
+            ]
+            
+            button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Deal {i} ({price} ⭐)"
             keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
         
         # Navigation buttons
@@ -585,13 +599,72 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
         total_items = len(content_directory.get('items', []))
         
         if total_pictures == 0 and total_videos == 0 and total_items == 0:
+            # Check for existing deals for this creator
+            from managers.pool_manager import get_pool_manager
+            pool_manager = get_pool_manager()
+            existing_deals = pool_manager.get_active_pools(limit=3, creator_filter=creator_name)
+            
+            message_text = f"📭 No content currently available for '{creator_name}'.\n\n"
+            
+            keyboard = []
+            
+            # Show existing deals if any
+            if existing_deals:
+                message_text += f"🔥 **But wait! Exclusive deals available:**\n\n"
+                
+                for i, deal in enumerate(existing_deals[:2], 1):
+                    completion = deal['completion_percentage']
+                    price = deal['current_price_per_user']
+                    
+                    # Create enticing deal descriptions
+                    deal_titles = [
+                        f"🔥 Hot Content Deal",
+                        f"💎 Premium Access", 
+                        f"🌟 Exclusive Content",
+                        f"💋 Special Offer",
+                        f"🎯 Limited Deal"
+                    ]
+                    
+                    deal_title = deal_titles[i-1] if i-1 < len(deal_titles) else f"🔥 Deal {i}"
+                    
+                    message_text += f"**{deal_title}**\n"
+                    message_text += f"📝 {deal['content_title'][:40]}{'...' if len(deal['content_title']) > 40 else ''}\n"
+                    message_text += f"💰 Only {price} ⭐ (price drops as more buy!)\n"
+                    message_text += f"📊 {completion:.1f}% funded\n\n"
+                    
+                    # Add enticing button text
+                    button_texts = [
+                        f"🔥 Get Hot Deal ({price} ⭐)",
+                        f"💎 Unlock Premium ({price} ⭐)",
+                        f"🌟 Grab Exclusive ({price} ⭐)",
+                        f"💋 Get Special ({price} ⭐)",
+                        f"🎯 Claim Deal ({price} ⭐)"
+                    ]
+                    
+                    button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Deal ({price} ⭐)"
+                    keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
+                
+                if len(existing_deals) > 2:
+                    keyboard.append([InlineKeyboardButton("🔥 See All Hot Deals", callback_data="pools_menu")])
+                
+                message_text += f"💡 **Or try:**\n"
+            else:
+                message_text += f"💡 **Try:**\n"
+            
+            message_text += f"• Adjusting your filters\n"
+            message_text += f"• Searching for another creator\n\n"
+            message_text += f"**Can't find what you want?**\n"
+            
+            # Always add request options
+            keyboard.append([InlineKeyboardButton(f"📝 Request {creator_name} Content", callback_data=f"request_creator_{creator_name}")])
+            keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await query.edit_message_text(
-                f"📭 No content currently available for '{creator_name}'.\n\n"
-                f"This creator's thread may be empty or all content has been filtered out.\n\n"
-                f"💡 Try:\n"
-                f"• Adjusting your filters\n"
-                f"• Searching for another creator\n"
-                f"• Submitting request for creator."
+                message_text,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
             )
             return
             
@@ -721,13 +794,73 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
         total_items = len(content_directory.get('items', []))
         
         if total_pictures == 0 and total_videos == 0 and total_items == 0:
+            # Check for existing deals for this creator
+            from managers.pool_manager import get_pool_manager
+            pool_manager = get_pool_manager()
+            existing_deals = pool_manager.get_active_pools(limit=3, creator_filter=creator_name)
+            
+            message_text = f"📭 No content currently available for '{creator_name}'.\n\n"
+            message_text += f"This creator's thread may be empty or all content has been filtered out.\n\n"
+            
+            keyboard = []
+            
+            # Show existing deals if any
+            if existing_deals:
+                message_text += f"🔥 **But check out these exclusive deals:**\n\n"
+                
+                for i, deal in enumerate(existing_deals[:2], 1):
+                    completion = deal['completion_percentage']
+                    price = deal['current_price_per_user']
+                    
+                    # Create enticing deal descriptions
+                    deal_titles = [
+                        f"🔥 Steamy Content",
+                        f"💎 VIP Access", 
+                        f"🌟 Premium Collection",
+                        f"💋 Intimate Content",
+                        f"🎯 Exclusive Drop"
+                    ]
+                    
+                    deal_title = deal_titles[i-1] if i-1 < len(deal_titles) else f"🔥 Deal {i}"
+                    
+                    message_text += f"**{deal_title}**\n"
+                    message_text += f"📝 {deal['content_title'][:40]}{'...' if len(deal['content_title']) > 40 else ''}\n"
+                    message_text += f"💰 Only {price} ⭐ (gets cheaper!)\n"
+                    message_text += f"📊 {completion:.1f}% funded\n\n"
+                    
+                    # Add enticing button text
+                    button_texts = [
+                        f"🔥 Get Steamy ({price} ⭐)",
+                        f"💎 Access VIP ({price} ⭐)",
+                        f"🌟 Get Premium ({price} ⭐)",
+                        f"💋 Get Intimate ({price} ⭐)",
+                        f"🎯 Grab Exclusive ({price} ⭐)"
+                    ]
+                    
+                    button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Deal ({price} ⭐)"
+                    keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
+                
+                if len(existing_deals) > 2:
+                    keyboard.append([InlineKeyboardButton("🔥 Browse All Deals", callback_data="pools_menu")])
+                
+                message_text += f"💡 **Or try:**\n"
+            else:
+                message_text += f"💡 **Try:**\n"
+            
+            message_text += f"• Adjusting your filters\n"
+            message_text += f"• Searching for another creator\n\n"
+            message_text += f"**Want specific content?**\n"
+            
+            # Always add request options
+            keyboard.append([InlineKeyboardButton(f"📝 Request {creator_name} Content", callback_data=f"request_creator_{creator_name}")])
+            keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await query.edit_message_text(
-                f"📭 No content currently available for '{creator_name}'.\n\n"
-                f"This creator's thread may be empty or all content has been filtered out.\n\n"
-                f"💡 Try:\n"
-                f"• Adjusting your filters\n"
-                f"• Searching for another creator\n"
-                f"• Submitting request for creator"
+                message_text,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
             )
             return
         

@@ -1367,7 +1367,6 @@ Welcome, worker! Your job is to help improve video titles in our content library
             if total_pictures == 0 and total_videos == 0 and total_items == 0:
                 await message.edit_text(
                     f"📭 No content currently available for '{creator_name}'.\n\n"
-                    f"This creator's thread may be empty or all content has been filtered out."
                 )
                 return
             

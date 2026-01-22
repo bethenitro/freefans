@@ -22,10 +22,12 @@ try:
     logger = logging.getLogger(__name__)
     logger.info("✅ Using selectolax (10-100x faster HTML parsing)")
 except ImportError:
-    from bs4 import BeautifulSoup
     USING_FAST_PARSER = False
     logger = logging.getLogger(__name__)
     logger.warning("⚠️  selectolax not installed, using BeautifulSoup (slower). Install: pip install selectolax")
+
+# Always import BeautifulSoup for fallback functions
+from bs4 import BeautifulSoup
 
 # Create a thread pool executor for CPU-bound parsing tasks
 # Increased workers from 4 to 8 for better performance

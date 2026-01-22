@@ -82,10 +82,18 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
                         message_text += f"**{i}. {deal['creator_name']} - {deal['content_title'][:30]}{'...' if len(deal['content_title']) > 30 else ''}**\n"
                         message_text += f"💰 {price} ⭐ • 📊 {completion:.1f}%\n\n"
                         
-                        deal_text = f"💎 {deal['creator_name']} Deal ({price} ⭐)"
+                        # Create enticing deal button text
+                        deal_button_texts = [
+                            f"🔥 {deal['creator_name']} Hot Deal ({price} ⭐)",
+                            f"💎 {deal['creator_name']} VIP ({price} ⭐)",
+                            f"🌟 {deal['creator_name']} Premium ({price} ⭐)",
+                            f"💋 {deal['creator_name']} Exclusive ({price} ⭐)"
+                        ]
+                        
+                        deal_text = deal_button_texts[i-1] if i-1 < len(deal_button_texts) else f"💎 {deal['creator_name']} Deal ({price} ⭐)"
                         keyboard.append([InlineKeyboardButton(deal_text, callback_data=f"view_pool_{deal['pool_id']}")])
                     
-                    keyboard.append([InlineKeyboardButton("💎 Browse All Deals", callback_data="pools_menu")])
+                    keyboard.append([InlineKeyboardButton("🔥 Browse All Hot Deals", callback_data="pools_menu")])
                 else:
                     message_text += f"💡 **Can't find '{creator_name}'? Request them!**\n\n"
                 
@@ -153,13 +161,21 @@ async def show_existing_deals_for_creator(message, creator_name: str, deals: Lis
             
             text += deal_text
             
-            # Add button for each deal
-            button_text = f"💎 Get Deal {i} ({price} ⭐)"
+            # Add button for each deal with enticing text
+            button_texts = [
+                f"🔥 Get Steamy Deal {i} ({price} ⭐)",
+                f"💎 Access VIP Deal {i} ({price} ⭐)",
+                f"🌟 Grab Premium {i} ({price} ⭐)",
+                f"💋 Get Exclusive {i} ({price} ⭐)",
+                f"🎯 Claim Special {i} ({price} ⭐)"
+            ]
+            
+            button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Deal {i} ({price} ⭐)"
             keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
         
         # Add navigation buttons
         keyboard.append([InlineKeyboardButton("🔍 Search Different Creator", callback_data="search_creator")])
-        keyboard.append([InlineKeyboardButton("💎 Browse All Deals", callback_data="pools_menu")])
+        keyboard.append([InlineKeyboardButton("🔥 Browse All Hot Deals", callback_data="pools_menu")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -297,10 +313,19 @@ async def display_creator_selection_page(message, session, page: int = 0):
     if not is_simpcity:
         keyboard.append([InlineKeyboardButton("🔍 Not found? Search More", callback_data="search_on_simpcity")])
     
-    # Add existing pools button if there are pools for this creator
+    # Add existing deals button if there are deals for this creator
     if hasattr(session, 'existing_pools') and session.existing_pools:
         pool_count = len(session.existing_pools)
-        keyboard.append([InlineKeyboardButton(f"💎 View {pool_count} Active Deal{'s' if pool_count > 1 else ''}", callback_data="show_creator_deals")])
+        
+        # Create enticing button text based on count
+        if pool_count == 1:
+            button_text = "🔥 Hot Deal Available!"
+        elif pool_count == 2:
+            button_text = "💎 2 VIP Deals Available!"
+        else:
+            button_text = f"🌟 {pool_count} Premium Deals!"
+            
+        keyboard.append([InlineKeyboardButton(button_text, callback_data="show_creator_deals")])
     
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="search_creator")])
     reply_markup = InlineKeyboardMarkup(keyboard)
