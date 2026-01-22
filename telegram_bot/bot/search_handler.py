@@ -69,29 +69,38 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
                 message_text += f"• Try a different name or alias\n"
                 message_text += f"• Search for another creator\n\n"
                 
+                keyboard = []
+                
                 # Check if there are any pools for similar names
                 similar_pools = pool_manager.get_active_pools(limit=3)
                 if similar_pools:
-                    message_text += f"💡 Or check out these active community pools:\n"
-                    keyboard = []
-                    for pool in similar_pools[:3]:
-                        pool_text = f"🏊‍♀️ {pool['creator_name']} - {pool['content_title'][:30]}..."
+                    message_text += f"💡 Or check out these active community pools:\n\n"
+                    for i, pool in enumerate(similar_pools[:3], 1):
+                        completion = pool['completion_percentage']
+                        price = pool['current_price_per_user']
+                        
+                        message_text += f"**{i}. {pool['creator_name']} - {pool['content_title'][:30]}{'...' if len(pool['content_title']) > 30 else ''}**\n"
+                        message_text += f"💰 {price} ⭐ • 📊 {completion:.1f}%\n\n"
+                        
+                        pool_text = f"🏊‍♀️ {pool['creator_name']} Pool ({price} ⭐)"
                         keyboard.append([InlineKeyboardButton(pool_text, callback_data=f"view_pool_{pool['pool_id']}")])
                     
-                    keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    
-                    await send_message_with_retry(
-                        search_message.edit_text,
-                        message_text,
-                        reply_markup=reply_markup
-                    )
+                    keyboard.append([InlineKeyboardButton("🏊‍♀️ Browse All Pools", callback_data="pools_menu")])
                 else:
-                    message_text += f"We're always adding new content, so check back soon! 💋"
-                    await send_message_with_retry(
-                        search_message.edit_text,
-                        message_text
-                    )
+                    message_text += f"💡 **Can't find '{creator_name}'? Request them!**\n\n"
+                
+                # Always add request option
+                keyboard.append([InlineKeyboardButton(f"📝 Request '{creator_name}'", callback_data=f"request_creator_{creator_name}")])
+                keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await send_message_with_retry(
+                    search_message.edit_text,
+                    message_text,
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
+                )
             except (TimedOut, NetworkError):
                 pass
             return

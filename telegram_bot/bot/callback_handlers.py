@@ -111,6 +111,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await handle_show_creator_pools(query, session)
     elif data == "back_to_creator_selection":
         await handle_back_to_creator_selection(query, session)
+    elif data.startswith("request_creator_"):
+        await handle_request_creator_from_search(query, session, data)
+    elif data.startswith("submit_creator_request_"):
+        await handle_submit_creator_request(query, session, data)
     elif data.startswith("creator_page|"):
         await handle_creator_page_change(query, session, data)
     elif data.startswith("select_creator|"):
@@ -200,12 +204,49 @@ async def handle_search_on_simpcity(query, session, bot_instance) -> None:
         simpcity_results = await bot_instance.content_manager.scraper.search_simpcity(creator_name)
         
         if not simpcity_results:
+            # Check for existing pools for this creator
+            from managers.pool_manager import get_pool_manager
+            pool_manager = get_pool_manager()
+            existing_pools = pool_manager.get_active_pools(limit=5, creator_filter=creator_name)
+            
+            message_text = f"❌ No additional results found for '{creator_name}'.\n\n"
+            message_text += "The creator may not be available, or try:\n"
+            message_text += "• Check the spelling\n"
+            message_text += "• Try a different name/alias\n"
+            message_text += "• Search for a different creator\n\n"
+            
+            keyboard = []
+            
+            # Show existing pools if any
+            if existing_pools:
+                message_text += f"💡 **But there are active community pools:**\n\n"
+                
+                for i, pool in enumerate(existing_pools[:3], 1):
+                    completion = pool['completion_percentage']
+                    price = pool['current_price_per_user']
+                    
+                    message_text += f"**{i}. {pool['content_title'][:40]}{'...' if len(pool['content_title']) > 40 else ''}**\n"
+                    message_text += f"💰 Current Price: {price} ⭐\n"
+                    message_text += f"📊 Progress: {completion:.1f}%\n\n"
+                    
+                    # Add button for each pool
+                    button_text = f"🏊‍♀️ Join Pool {i} ({price} ⭐)"
+                    keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{pool['pool_id']}")])
+                
+                keyboard.append([InlineKeyboardButton("🏊‍♀️ View All Pools", callback_data="pools_menu")])
+            else:
+                message_text += f"💡 **Can't find '{creator_name}'? Request them!**"
+            
+            # Always add request option
+            keyboard.append([InlineKeyboardButton(f"📝 Request '{creator_name}'", callback_data=f"request_creator_{creator_name}")])
+            keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_creator")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await query.edit_message_text(
-                f"❌ No additional results found for '{creator_name}'.\n\n"
-                "The creator may not be available, or try:\n"
-                "• Check the spelling\n"
-                "• Try a different name/alias\n"
-                "• Search for a different creator"
+                message_text,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
             )
             return
         
@@ -319,6 +360,97 @@ async def handle_back_to_creator_selection(query, session) -> None:
     except Exception as e:
         logger.error(f"Error returning to creator selection: {e}")
         await query.edit_message_text("❌ Error returning to search. Please try again.")
+
+async def handle_request_creator_from_search(query, session, data: str) -> None:
+    """Handle requesting a creator from search results."""
+    try:
+        # Extract creator name from callback data
+        creator_name = data.replace("request_creator_", "")
+        
+        # Set up session for creator request
+        session.awaiting_request = 'creator_request'
+        session.request_creator_name = creator_name
+        
+        # Show request form
+        text = f"📝 **Request Creator: {creator_name}**\n\n"
+        text += f"You're about to request content for **{creator_name}**.\n\n"
+        text += f"**What happens next:**\n"
+        text += f"• Your request will be reviewed by admins\n"
+        text += f"• If approved, content may be added or a community pool created\n"
+        text += f"• You'll be notified when content becomes available\n\n"
+        text += f"**Please provide additional details** (optional):\n"
+        text += f"• Specific content type you're looking for\n"
+        text += f"• Any aliases or alternative names\n"
+        text += f"• Platform where you've seen this creator\n\n"
+        text += f"💡 Send your message now, or click 'Submit Request' to proceed with just the name."
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Submit Request (Name Only)", callback_data=f"submit_creator_request_{creator_name}")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="search_creator")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"Error handling creator request from search: {e}")
+        await query.edit_message_text("❌ Error processing request. Please try again.")
+
+async def handle_submit_creator_request(query, session, data: str) -> None:
+    """Handle submitting a creator request."""
+    try:
+        # Extract creator name from callback data
+        creator_name = data.replace("submit_creator_request_", "")
+        user_id = query.from_user.id
+        
+        # Submit the request
+        from managers.request_manager import get_request_manager
+        request_manager = get_request_manager()
+        
+        request_id = request_manager.add_creator_request(
+            user_id=user_id,
+            creator_name=creator_name,
+            description=f"Requested from search: {creator_name}",
+            request_type="creator"
+        )
+        
+        if request_id:
+            text = f"✅ **Creator Request Submitted!**\n\n"
+            text += f"👤 **Creator:** {creator_name}\n"
+            text += f"🆔 **Request ID:** `{request_id}`\n\n"
+            text += f"**What's next:**\n"
+            text += f"• Admins will review your request\n"
+            text += f"• If approved, content may be added or a pool created\n"
+            text += f"• You'll be notified of any updates\n\n"
+            text += f"💡 You can check request status with admins or look for community pools!"
+            
+            keyboard = [
+                [InlineKeyboardButton("🏊‍♀️ Browse Community Pools", callback_data="pools_menu")],
+                [InlineKeyboardButton("🔍 New Search", callback_data="search_creator")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                text,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+        else:
+            await query.edit_message_text(
+                f"❌ Failed to submit request for '{creator_name}'. Please try again later."
+            )
+        
+        # Clear session state
+        session.awaiting_request = None
+        session.request_creator_name = None
+        
+    except Exception as e:
+        logger.error(f"Error submitting creator request: {e}")
+        await query.edit_message_text("❌ Error submitting request. Please try again.")
 
 async def handle_creator_page_change(query, session, data: str) -> None:
     """Handle pagination for creator selection."""
