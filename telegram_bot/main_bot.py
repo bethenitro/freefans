@@ -529,7 +529,6 @@ def main():
     application = (
         Application.builder()
         .token(TOKEN)
-        .base_url("https://bots.dashgram.io/883994:7b30aa785f0651a1e52765e0f40a9901d54d64ca4a601e5ba3276649650daa95")
         .connect_timeout(30.0)
         .read_timeout(30.0)
         .write_timeout(30.0)
