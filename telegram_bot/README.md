@@ -41,11 +41,11 @@ telegram_bot/
 - `/cancel` - Cancel current operation
 
 #### Content & Search
-- `/pools` - View active community pools with dynamic pricing
+- `/content` - View exclusive content with dynamic pricing
 - `/balance` - Check your Telegram Stars balance and transaction history
 - `🔍 Search Creator` - Search for a specific creator's content (menu button)
 - `🎲 Random Creator` - Get a random creator with lots of content (menu button)
-- `🏊‍♀️ Community Pools` - Browse and join community pools (menu button)
+- `🏊‍♀️ Exclusive Content` - Browse and purchase exclusive content (menu button)
 
 #### Requests
 - `📝 Request Creator` - Request a new creator to be added (menu button)
@@ -137,13 +137,13 @@ All other commands are available including:
 - Reply to video messages with suggested titles (interactive feature)
 - Submit video deletion requests for inappropriate content (interactive feature)
 
-## Community Pooling System
+## Exclusive Content System
 
 ### 🎯 **How Dynamic Pricing Works**
 
-The community pooling system uses dynamic pricing where the cost per user decreases as more people join:
+The exclusive content system uses dynamic pricing with automatic price adjustments:
 
-**Example: 100 Star Pool**
+**Example: 100 Star Content**
 - 1st person: ~25 Stars (early adopter price)
 - 5th person: ~15 Stars (price dropping)
 - 10th person: ~8 Stars (getting cheaper)
@@ -156,7 +156,7 @@ The community pooling system uses dynamic pricing where the cost per user decrea
 2. **Admin views requests**: `/poolrequests`
 3. **Admin creates pool**: `/createpool request CR-123456789 100`
 4. **Users join pool** at current dynamic price via `/pools`
-5. **Price decreases** automatically as more people join
+5. **Price adjusts** automatically based on demand
 6. **Pool completes** when total cost is reached
 7. **Admin delivers content**: `/completepool POOL-123 https://content-url`
 8. **All contributors get access** to the unlocked content
@@ -185,9 +185,9 @@ The community pooling system uses dynamic pricing where the cost per user decrea
 
 ### 🏊‍♀️ **User Pool Interaction**
 
-Users interact with pools through:
-- **Menu Button**: `🏊‍♀️ Community Pools`
-- **Command**: `/pools`
+Users interact with exclusive content through:
+- **Menu Button**: `🏊‍♀️ Exclusive Content`
+- **Command**: `/content`
 - **Balance Check**: `/balance`
 - **Smart Discovery**: When searching for creators, existing pools are automatically suggested
 

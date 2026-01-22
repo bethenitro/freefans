@@ -41,9 +41,9 @@ class DealHandlers:
             
             if not deals:
                 text = """
-💎 **Content Deals**
+💎 **Exclusive Content**
 
-No active deals right now! 
+No exclusive content available right now! 
 
 💰 Use `/balance` to check your Stars balance
 """
@@ -51,30 +51,26 @@ No active deals right now!
                 return
             
             # Create deals list
-            text = "💎 **Active Content Deals**\n\n"
-            text += "💡 Get exclusive content at discounted prices!\n\n"
+            text = "💎 **Exclusive Content**\n\n"
+            text += "💡 Get exclusive content at amazing prices!\n\n"
             
             keyboard = []
             for i, deal in enumerate(deals[:5], 1):  # Show max 5 deals
-                progress = deal['completion_percentage']
-                progress_bar = self._create_progress_bar(progress)
                 
                 text += f"**{i}. {deal['creator_name']}**\n"
                 text += f"📝 {deal['content_title']}\n"
-                text += f"💰 Current Price: {deal['current_price_per_user']} ⭐ (drops as more buy!)\n"
-                text += f"📊 Progress: {progress:.1f}%\n"
-                text += f"{progress_bar}\n\n"
+                text += f"💰 Price: {deal['current_price_per_user']} ⭐\n\n"
                 
                 # Add enticing view button
                 button_texts = [
-                    f"🔥 Hot Deal {i}",
+                    f"🔥 Hot Content {i}",
                     f"💎 VIP Access {i}",
                     f"🌟 Premium {i}",
                     f"💋 Exclusive {i}",
                     f"🎯 Special {i}"
                 ]
                 
-                button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Deal {i}"
+                button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Content {i}"
                 keyboard.append([InlineKeyboardButton(
                     button_text, 
                     callback_data=f"view_pool_{deal['pool_id']}"
@@ -159,28 +155,11 @@ No active deals right now!
         
         text += f"🎯 **Type:** {deal['content_type'].replace('_', ' ').title()}\n\n"
         
-        text += f"💰 **Progress:** {deal['current_amount']}/{deal['total_cost']} ⭐ ({progress:.1f}%)\n"
-        text += f"{progress_bar}\n\n"
-        
-        # Show current price and how it changes
+        # Show current price
         current_price = deal['current_price_per_user']
         remaining_cost = deal['total_cost'] - deal['current_amount']
         
-        text += f"💫 **Current Price:** {current_price} ⭐ per person\n"
-        
-        if remaining_cost > 0:
-            text += f"💰 **Remaining Cost:** {remaining_cost} ⭐\n\n"
-            
-            # Show how price decreases with more contributors
-            text += f"📊 **Price gets cheaper as more buy:**\n"
-            for additional in [1, 5, 10]:
-                # Calculate future price without revealing current contributor count
-                future_price = self.pool_manager.calculate_dynamic_price(
-                    deal['total_cost'], 
-                    deal['contributors_count'] + additional, 
-                    deal['max_contributors']
-                )
-                text += f"• +{additional} more buyers: {future_price} ⭐ each\n"
+        text += f"💫 **Price:** {current_price} ⭐\n\n"
         
         # Create keyboard
         keyboard = []
@@ -190,9 +169,9 @@ No active deals right now!
         elif deal['status'] == 'completed':
             keyboard.append([InlineKeyboardButton("🎉 View Content", callback_data=f"view_content_{pool_id}")])
         elif remaining_cost <= 0:
-            keyboard.append([InlineKeyboardButton("✅ Deal Complete", callback_data="pool_complete")])
+            keyboard.append([InlineKeyboardButton("✅ Content Available", callback_data="pool_complete")])
         
-        keyboard.append([InlineKeyboardButton("🔙 Back to Deals", callback_data="back_to_deals")])
+        keyboard.append([InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_deals")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
@@ -230,8 +209,8 @@ No active deals right now!
             
             await query.edit_message_text(
                 f"💳 **Payment Invoice Sent**\n\n"
-                f"Please complete the payment to contribute {amount} ⭐ to the pool.\n\n"
-                f"After payment, you'll be part of the community unlocking:\n"
+                f"Please complete the payment to purchase {amount} ⭐ of this content.\n\n"
+                f"After payment, you'll have access to:\n"
                 f"**{pool['content_title']}** by **{pool['creator_name']}**"
             )
             
@@ -265,8 +244,8 @@ No active deals right now!
         text = f"💰 **Your Balance**\n\n"
         text += f"⭐ **Current Balance:** {profile['balance']} Stars\n"
         text += f"💸 **Total Spent:** {profile['total_spent']} Stars\n"
-        text += f"🤝 **Total Contributed:** {profile['total_contributed']} Stars\n"
-        text += f"🏊‍♀️ **Pools Joined:** {profile['pools_joined']}\n\n"
+        text += f"🤝 **Total Purchased:** {profile['total_contributed']} Stars\n"
+        text += f"🏊‍♀️ **Content Purchased:** {profile['pools_joined']}\n\n"
         
         text += f"🎯 **Subscription:** {profile['subscription_tier'].title()}\n"
         
@@ -282,13 +261,13 @@ No active deals right now!
                 text += f"• {date}: {txn['description']} ({txn['amount']} ⭐)\n"
         else:
             text += f"\n💡 **Getting Started:**\n"
-            text += f"• Buy Stars to contribute to pools\n"
-            text += f"• Join community pools to unlock content\n"
-            text += f"• Check `/pools` for active pools"
+            text += f"• Buy Stars to purchase exclusive content\n"
+            text += f"• Browse exclusive content to unlock premium material\n"
+            text += f"• Check `/content` for available content"
         
         keyboard = [
             [InlineKeyboardButton("💳 Buy Stars", callback_data="buy_stars_menu")],
-            [InlineKeyboardButton("🔙 Back to Pools", callback_data="back_to_pools")]
+            [InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_pools")]
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -300,11 +279,11 @@ No active deals right now!
         
         contributions = self.pool_manager.get_user_contributions(user_id, limit=5)
         
-        text = f"📊 **Your Pool Contributions**\n\n"
+        text = f"📊 **Your Exclusive Content Purchases**\n\n"
         
         if not contributions:
-            text += "You haven't contributed to any pools yet.\n\n"
-            text += "💡 Join a pool to unlock exclusive content with the community!"
+            text += "You haven't purchased any exclusive content yet.\n\n"
+            text += "💡 Browse exclusive content to unlock premium material!"
         else:
             for i, contrib in enumerate(contributions, 1):
                 status_emoji = {
@@ -315,11 +294,10 @@ No active deals right now!
                 
                 text += f"**{i}. {contrib['creator_name']}**\n"
                 text += f"📝 {contrib['content_title']}\n"
-                text += f"💰 Contributed: {contrib['amount']} ⭐ {status_emoji}\n"
-                text += f"📊 Pool: {contrib['pool_completion']:.1f}% complete\n"
+                text += f"💰 Paid: {contrib['amount']} ⭐ {status_emoji}\n"
                 text += f"📅 {contrib['created_at'].strftime('%Y-%m-%d')}\n\n"
         
-        keyboard = [[InlineKeyboardButton("🔙 Back to Pools", callback_data="back_to_pools")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_pools")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
@@ -349,7 +327,7 @@ No active deals right now!
             await query.edit_message_text(
                 f"💳 **Star Purchase Invoice Sent**\n\n"
                 f"Please complete the payment to receive {pkg_data['stars']} ⭐\n\n"
-                f"These Stars can be used to contribute to community pools!"
+                f"These Stars can be used to purchase exclusive content!"
             )
             
         except Exception as e:
@@ -419,7 +397,7 @@ No active deals right now!
                     await update.message.reply_text(
                         f"✅ **Payment Successful!**\n\n"
                         f"You received {stars} ⭐ Stars!\n\n"
-                        f"Use /pools to find community pools to contribute to."
+                        f"Use /content to find exclusive content to purchase."
                     )
                 
                 elif payload.startswith('pool_contribution_') or payload.startswith('pool_join_'):
@@ -504,7 +482,7 @@ No active deals right now!
             
             await update.message.reply_text(
                 f"💳 **Custom Contribution: {amount} ⭐**\n\n"
-                f"Please complete the payment to contribute to:\n"
+                f"Please complete the payment to purchase:\n"
                 f"**{pool['content_title']}** by **{pool['creator_name']}**"
             )
             
@@ -527,16 +505,16 @@ No active deals right now!
         
         # Check if pool is full (but don't show this to users)
         if pool['contributors_count'] >= pool['max_contributors']:
-            await query.edit_message_text("❌ Pool is currently at capacity.")
+            await query.edit_message_text("❌ Content is currently unavailable.")
             return
         
         # Get current price
         current_price = pool['current_price_per_user']
         
         # Create invoice for payment
-        title = f"Join Pool - {pool['creator_name']}"
+        title = f"Purchase Content - {pool['creator_name']}"
         prices = [LabeledPrice(f"{current_price} Stars", current_price)]
-        description = f"Join the community pool to unlock: {pool['content_title']}"
+        description = f"Purchase exclusive content: {pool['content_title']}"
         
         # Create invoice payload
         payload = f"pool_join_{pool_id}_{current_price}"
@@ -557,9 +535,9 @@ No active deals right now!
             await query.edit_message_text(
                 f"💳 **Payment Invoice Sent**\n\n"
                 f"💰 **Your Price:** {current_price} ⭐\n\n"
-                f"After payment, you'll be part of the community unlocking:\n"
+                f"After payment, you'll have access to:\n"
                 f"**{pool['content_title']}** by **{pool['creator_name']}**\n\n"
-                f"💡 The price decreases as more people join!"
+                f"💡 Enjoy your exclusive content!"
             )
             
         except Exception as e:

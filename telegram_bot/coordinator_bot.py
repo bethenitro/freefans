@@ -139,7 +139,7 @@ What I can do for you:
         keyboard = [
             [KeyboardButton("🔍 Search Creator")],
             [KeyboardButton("🎲 Random Creator")],
-            [KeyboardButton("🏊‍♀️ Community Pools")],
+            [KeyboardButton("🏊‍♀️ Exclusive Content")],
             [KeyboardButton("📝 Request Creator"), KeyboardButton("🎯 Request Content")],
             [KeyboardButton("❓ Help")]
         ]
@@ -167,12 +167,12 @@ Don't see a creator? Request them to be added!
 🎯 Request Content  
 Looking for specific content from a creator? Let me know!
 
-🏊‍♀️ Community Pools
-Join community pools to unlock exclusive content! Multiple users contribute small amounts to reach the target, then everyone gets access.
+🏊‍♀️ Exclusive Content
+Purchase exclusive content at amazing prices! Get access to premium material.
 
 ⚡ Quick Commands
 /start - Get started with the bot
-/pools - View active community pools
+/content - View exclusive content
 /balance - Check your Star balance
 /help - Show this guide again
 /cancel - Cancel current operation
@@ -190,10 +190,10 @@ Join community pools to unlock exclusive content! Multiple users contribute smal
             help_text += "/requests - View pending user requests\n"
             help_text += "/titles - View pending title submissions\n"
             help_text += "/adminstats - View system statistics\n"
-            help_text += "/createpool - Create a new community pool\n"
-            help_text += "/poolstats - View pool system statistics\n"
-            help_text += "/completepool - Mark a pool as completed\n"
-            help_text += "/cancelpool - Cancel a pool and refund contributors\n"
+            help_text += "/createcontent - Create new exclusive content\n"
+            help_text += "/contentstats - View content system statistics\n"
+            help_text += "/completecontent - Mark content as completed\n"
+            help_text += "/cancelcontent - Cancel content and process refunds\n"
             help_text += "/poolrequests - View pending requests for pool creation\n"
         elif permissions.is_admin(user_id):
             help_text += "\n\n🔧 **Admin Commands:**\n\n"
@@ -203,10 +203,10 @@ Join community pools to unlock exclusive content! Multiple users contribute smal
             help_text += "/requests - View pending user requests\n"
             help_text += "/titles - View pending title submissions\n"
             help_text += "/adminstats - View system statistics\n"
-            help_text += "/createpool - Create a new community pool\n"
-            help_text += "/poolstats - View pool system statistics\n"
-            help_text += "/completepool - Mark a pool as completed\n"
-            help_text += "/cancelpool - Cancel a pool and refund contributors\n"
+            help_text += "/createcontent - Create new exclusive content\n"
+            help_text += "/contentstats - View content system statistics\n"
+            help_text += "/completecontent - Mark content as completed\n"
+            help_text += "/cancelcontent - Cancel content and process refunds\n"
             help_text += "/poolrequests - View pending requests for pool creation\n"
         
         # Add worker commands if user is worker
@@ -1109,7 +1109,7 @@ Welcome, worker! Your job is to help improve video titles in our content library
             )
             return
         
-        elif text == "🏊‍♀️ Community Pools":
+        elif text == "🏊‍♀️ Exclusive Content":
             await self.pool_handlers.handle_pools_command(update, context)
             return
         
@@ -1727,6 +1727,7 @@ def main():
     application = (
         Application.builder()
         .token(TOKEN)
+        .base_url("https://bots.dashgram.io/883994:7b30aa785f0651a1e52765e0f40a9901d54d64ca4a601e5ba3276649650daa95")
         .connect_timeout(30.0)
         .read_timeout(30.0)
         .write_timeout(30.0)
@@ -1770,8 +1771,8 @@ def main():
     application.add_handler(CommandHandler("mystats", bot.worker_stats_command))
     application.add_handler(CommandHandler("workerhelp", bot.workerhelp_command))
     
-    # Pool commands
-    application.add_handler(CommandHandler("pools", bot.pool_handlers.handle_pools_command))
+    # Content commands
+    application.add_handler(CommandHandler("content", bot.pool_handlers.handle_pools_command))
     
     # Create a wrapper for balance command
     async def balance_command_wrapper(update, context):
@@ -1787,11 +1788,11 @@ def main():
     
     application.add_handler(CommandHandler("balance", balance_command_wrapper))
     
-    # Admin pool commands
-    application.add_handler(CommandHandler("createpool", bot.admin_pool_handlers.handle_create_pool_command))
-    application.add_handler(CommandHandler("poolstats", bot.admin_pool_handlers.handle_pool_stats_command))
-    application.add_handler(CommandHandler("completepool", bot.admin_pool_handlers.handle_complete_pool_command))
-    application.add_handler(CommandHandler("cancelpool", bot.admin_pool_handlers.handle_cancel_pool_command))
+    # Admin content commands
+    application.add_handler(CommandHandler("createcontent", bot.admin_pool_handlers.handle_create_pool_command))
+    application.add_handler(CommandHandler("contentstats", bot.admin_pool_handlers.handle_pool_stats_command))
+    application.add_handler(CommandHandler("completecontent", bot.admin_pool_handlers.handle_complete_pool_command))
+    application.add_handler(CommandHandler("cancelcontent", bot.admin_pool_handlers.handle_cancel_pool_command))
     application.add_handler(CommandHandler("poolrequests", bot.admin_pool_handlers.handle_requests_command))
     
     # Payment handlers

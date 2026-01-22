@@ -93,7 +93,7 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
                         deal_text = deal_button_texts[i-1] if i-1 < len(deal_button_texts) else f"💎 {deal['creator_name']} Deal ({price} ⭐)"
                         keyboard.append([InlineKeyboardButton(deal_text, callback_data=f"view_pool_{deal['pool_id']}")])
                     
-                    keyboard.append([InlineKeyboardButton("🔥 Browse All Hot Deals", callback_data="pools_menu")])
+                    keyboard.append([InlineKeyboardButton("🔥 Browse All Hot Content", callback_data="pools_menu")])
                 else:
                     message_text += f"💡 **Can't find '{creator_name}'? Request them!**\n\n"
                 
@@ -142,19 +142,17 @@ async def handle_creator_search(update: Update, context: ContextTypes.DEFAULT_TY
 async def show_existing_deals_for_creator(message, creator_name: str, deals: List[Dict]):
     """Show existing deals for a creator when no content is found."""
     try:
-        text = f"💎 **Content Deals for {creator_name}**\n\n"
-        text += f"No direct content found, but there are active content deals!\n\n"
-        text += f"💡 **Get exclusive content at discounted prices:**\n\n"
+        text = f"💎 **Exclusive Content for {creator_name}**\n\n"
+        text += f"No direct content found, but there are exclusive content offers!\n\n"
+        text += f"💡 **Get exclusive content at amazing prices:**\n\n"
         
         keyboard = []
         
         for i, deal in enumerate(deals[:5], 1):
-            completion = deal['completion_percentage']
             price = deal['current_price_per_user']
             
             deal_text = f"**{i}. {deal['content_title'][:40]}{'...' if len(deal['content_title']) > 40 else ''}**\n"
-            deal_text += f"💰 Current Price: {price} ⭐ (price drops as more buy!)\n"
-            deal_text += f"📊 Progress: {completion:.1f}%\n"
+            deal_text += f"💰 Price: {price} ⭐\n"
             
             if i < len(deals):
                 deal_text += "\n"
@@ -163,19 +161,19 @@ async def show_existing_deals_for_creator(message, creator_name: str, deals: Lis
             
             # Add button for each deal with enticing text
             button_texts = [
-                f"🔥 Get Steamy Deal {i} ({price} ⭐)",
-                f"💎 Access VIP Deal {i} ({price} ⭐)",
+                f"🔥 Get Steamy Content {i} ({price} ⭐)",
+                f"💎 Access VIP Content {i} ({price} ⭐)",
                 f"🌟 Grab Premium {i} ({price} ⭐)",
                 f"💋 Get Exclusive {i} ({price} ⭐)",
                 f"🎯 Claim Special {i} ({price} ⭐)"
             ]
             
-            button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Deal {i} ({price} ⭐)"
+            button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Content {i} ({price} ⭐)"
             keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
         
         # Add navigation buttons
         keyboard.append([InlineKeyboardButton("🔍 Search Different Creator", callback_data="search_creator")])
-        keyboard.append([InlineKeyboardButton("🔥 Browse All Hot Deals", callback_data="pools_menu")])
+        keyboard.append([InlineKeyboardButton("🔥 Browse All Hot Content", callback_data="pools_menu")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         

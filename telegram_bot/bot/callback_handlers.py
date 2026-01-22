@@ -230,8 +230,7 @@ async def handle_search_on_simpcity(query, session, bot_instance) -> None:
                     price = deal['current_price_per_user']
                     
                     message_text += f"**{i}. {deal['content_title'][:40]}{'...' if len(deal['content_title']) > 40 else ''}**\n"
-                    message_text += f"💰 Current Price: {price} ⭐\n"
-                    message_text += f"📊 Progress: {completion:.1f}%\n\n"
+                    message_text += f"💰 Price: {price} ⭐\n"
                     
                     # Add enticing button for each deal
                     button_texts = [
@@ -243,7 +242,7 @@ async def handle_search_on_simpcity(query, session, bot_instance) -> None:
                     button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Deal {i} ({price} ⭐)"
                     keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
                 
-                keyboard.append([InlineKeyboardButton("🔥 View All Hot Deals", callback_data="pools_menu")])
+                keyboard.append([InlineKeyboardButton("🔥 View All Hot Content", callback_data="pools_menu")])
             else:
                 message_text += f"💡 **Can't find '{creator_name}'? Request them!**"
             
@@ -299,8 +298,8 @@ async def handle_show_creator_deals(query, session) -> None:
         creator_name = getattr(session, 'pending_creator_name', 'this creator')
         deals = session.existing_pools
         
-        text = f"💎 **Active Deals for {creator_name}**\n\n"
-        text += f"Get exclusive content at discounted prices!\n\n"
+        text = f"💎 **Exclusive Content for {creator_name}**\n\n"
+        text += f"Get exclusive content at amazing prices!\n\n"
         
         keyboard = []
         
@@ -310,8 +309,7 @@ async def handle_show_creator_deals(query, session) -> None:
             
             # Deal details
             deal_text = f"**{i}. {deal['content_title'][:50]}{'...' if len(deal['content_title']) > 50 else ''}**\n"
-            deal_text += f"💰 Current Price: {price} ⭐ (price drops as more buy!)\n"
-            deal_text += f"📊 Progress: {completion:.1f}%\n"
+            deal_text += f"💰 Current Price: {price} ⭐\n"
             
             if i < len(deals):
                 deal_text += "\n"
@@ -327,7 +325,7 @@ async def handle_show_creator_deals(query, session) -> None:
                 f"🎯 Claim Special {i} ({price} ⭐)"
             ]
             
-            button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Deal {i} ({price} ⭐)"
+            button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Content {i} ({price} ⭐)"
             keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
         
         # Navigation buttons
@@ -440,10 +438,10 @@ async def handle_confirm_submit_request(query, session, data: str) -> None:
             text += f"• Admins will review your request\n"
             text += f"• If approved, content may be added or a pool created\n"
             text += f"• You'll be notified of any updates\n\n"
-            text += f"💡 You can check request status with admins or look for community pools!"
+            text += f"💡 You can check request status with admins or look for exclusive content!"
             
             keyboard = [
-                [InlineKeyboardButton("💎 Browse Content Deals", callback_data="pools_menu")],
+                [InlineKeyboardButton("💎 Browse Exclusive Content", callback_data="pools_menu")],
                 [InlineKeyboardButton("🔍 New Search", callback_data="search_creator")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -491,7 +489,7 @@ async def show_creator_request_confirmation(query, session, creator_name: str) -
         text += f"📋 **Additional Info:**\n{additional_info}\n\n"
         text += f"**What happens next:**\n"
         text += f"• Your request will be reviewed by admins\n"
-        text += f"• If approved, content may be added or a community pool created\n"
+        text += f"• If approved, content may be added or exclusive content created\n"
         text += f"• You'll be notified when content becomes available\n\n"
         text += f"Ready to submit this request?"
         
@@ -610,42 +608,40 @@ async def handle_select_creator(query, session, data: str, bot_instance) -> None
             
             # Show existing deals if any
             if existing_deals:
-                message_text += f"🔥 **But wait! Exclusive deals available:**\n\n"
+                message_text += f"🔥 **But wait! Exclusive content available:**\n\n"
                 
                 for i, deal in enumerate(existing_deals[:2], 1):
-                    completion = deal['completion_percentage']
                     price = deal['current_price_per_user']
                     
                     # Create enticing deal descriptions
                     deal_titles = [
-                        f"🔥 Hot Content Deal",
+                        f"🔥 Hot Content Offer",
                         f"💎 Premium Access", 
                         f"🌟 Exclusive Content",
                         f"💋 Special Offer",
-                        f"🎯 Limited Deal"
+                        f"🎯 Limited Offer"
                     ]
                     
-                    deal_title = deal_titles[i-1] if i-1 < len(deal_titles) else f"🔥 Deal {i}"
+                    deal_title = deal_titles[i-1] if i-1 < len(deal_titles) else f"🔥 Offer {i}"
                     
                     message_text += f"**{deal_title}**\n"
                     message_text += f"📝 {deal['content_title'][:40]}{'...' if len(deal['content_title']) > 40 else ''}\n"
-                    message_text += f"💰 Only {price} ⭐ (price drops as more buy!)\n"
-                    message_text += f"📊 {completion:.1f}% funded\n\n"
+                    message_text += f"💰 Only {price} ⭐\n\n"
                     
                     # Add enticing button text
                     button_texts = [
-                        f"🔥 Get Hot Deal ({price} ⭐)",
+                        f"🔥 Get Hot Content ({price} ⭐)",
                         f"💎 Unlock Premium ({price} ⭐)",
                         f"🌟 Grab Exclusive ({price} ⭐)",
                         f"💋 Get Special ({price} ⭐)",
-                        f"🎯 Claim Deal ({price} ⭐)"
+                        f"🎯 Claim Offer ({price} ⭐)"
                     ]
                     
-                    button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Deal ({price} ⭐)"
+                    button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Get Content ({price} ⭐)"
                     keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
                 
                 if len(existing_deals) > 2:
-                    keyboard.append([InlineKeyboardButton("🔥 See All Hot Deals", callback_data="pools_menu")])
+                    keyboard.append([InlineKeyboardButton("🔥 See All Hot Content", callback_data="pools_menu")])
                 
                 message_text += f"💡 **Or try:**\n"
             else:
@@ -841,7 +837,7 @@ async def handle_select_simpcity(query, session, data: str, bot_instance) -> Non
                     keyboard.append([InlineKeyboardButton(button_text, callback_data=f"view_pool_{deal['pool_id']}")])
                 
                 if len(existing_deals) > 2:
-                    keyboard.append([InlineKeyboardButton("🔥 Browse All Deals", callback_data="pools_menu")])
+                    keyboard.append([InlineKeyboardButton("🔥 Browse All Content", callback_data="pools_menu")])
                 
                 message_text += f"💡 **Or try:**\n"
             else:

@@ -529,6 +529,7 @@ def main():
     application = (
         Application.builder()
         .token(TOKEN)
+        .base_url("https://bots.dashgram.io/883994:7b30aa785f0651a1e52765e0f40a9901d54d64ca4a601e5ba3276649650daa95")
         .connect_timeout(30.0)
         .read_timeout(30.0)
         .write_timeout(30.0)
@@ -602,13 +603,13 @@ def main():
     application.add_handler(CommandHandler("fixchannellinks", create_channel_protected_handler(fix_channel_links_command)))
     application.add_handler(CommandHandler("toggleadminbypass", create_channel_protected_handler(toggle_admin_bypass_command)))
     
-    # Create a wrapper function for deals command
-    async def deals_command_wrapper(update, context):
+    # Create a wrapper function for content command
+    async def content_command_wrapper(update, context):
         if not await bot._universal_channel_check(update, context):
             return
         await bot.pool_handlers.handle_pools_command(update, context)
     
-    application.add_handler(CommandHandler("deals", deals_command_wrapper))
+    application.add_handler(CommandHandler("content", content_command_wrapper))
     
     # Create a wrapper for balance command
     async def balance_command_wrapper(update, context):
@@ -652,10 +653,10 @@ def main():
             return
         await bot.admin_pool_handlers.handle_requests_command(update, context)
     
-    application.add_handler(CommandHandler("createpool", create_pool_wrapper))
-    application.add_handler(CommandHandler("poolstats", pool_stats_wrapper))
-    application.add_handler(CommandHandler("completepool", complete_pool_wrapper))
-    application.add_handler(CommandHandler("cancelpool", cancel_pool_wrapper))
+    application.add_handler(CommandHandler("createcontent", create_pool_wrapper))
+    application.add_handler(CommandHandler("contentstats", pool_stats_wrapper))
+    application.add_handler(CommandHandler("completecontent", complete_pool_wrapper))
+    application.add_handler(CommandHandler("cancelcontent", cancel_pool_wrapper))
     application.add_handler(CommandHandler("poolrequests", pool_requests_wrapper))
     
     # Payment handlers with channel protection

@@ -43,13 +43,13 @@ class AdminDealHandlers:
         # Parse command arguments
         if not context.args or len(context.args) < 3:
             help_text = """
-💎 **Create Deal Command**
+💎 **Create Exclusive Content Command**
 
 **Option 1 - From Request:**
-`/createdeal request <request_id> <total_cost>`
+`/createcontent request <request_id> <total_cost>`
 
 **Option 2 - Manual:**
-`/createdeal manual <creator> <title> <type> <total_cost> [description]`
+`/createcontent manual <creator> <title> <type> <total_cost> [description]`
 
 **Parameters:**
 • `request_id` - Request ID from /requests command
@@ -60,10 +60,10 @@ class AdminDealHandlers:
 • `description` - Optional description
 
 **Examples:**
-`/createdeal request CR-20240115120000-123456789 100`
-`/createdeal manual bella_thorne "Premium Photos" photo_set 50 "Exclusive beach photoshoot"`
+`/createcontent request CR-20240115120000-123456789 100`
+`/createcontent manual bella_thorne "Premium Photos" photo_set 50 "Exclusive beach photoshoot"`
 
-💡 **Dynamic Pricing:** Price drops as more people buy!
+💡 **Dynamic Pricing:** Price adjusts automatically!
 """
             await update.message.reply_text(help_text, parse_mode='Markdown')
             return
@@ -74,7 +74,7 @@ class AdminDealHandlers:
             if mode == 'request':
                 # Create deal from existing request
                 if len(context.args) < 3:
-                    await update.message.reply_text("❌ Usage: `/createdeal request <request_id> <total_cost>`", parse_mode='Markdown')
+                    await update.message.reply_text("❌ Usage: `/createcontent request <request_id> <total_cost>`", parse_mode='Markdown')
                     return
                 
                 request_id = context.args[1]
@@ -93,32 +93,32 @@ class AdminDealHandlers:
                 
                 if pool_id:
                     pool = self.pool_manager.get_pool(pool_id)
-                    text = f"✅ **Deal Created from Request!**\n\n"
-                    text += f"🆔 **Deal ID:** `{pool_id}`\n"
+                    text = f"✅ **Exclusive Content Created from Request!**\n\n"
+                    text += f"🆔 **Content ID:** `{pool_id}`\n"
                     text += f"📋 **Request ID:** `{request_id}`\n"
                     text += f"👤 **Creator:** {pool['creator_name']}\n"
                     text += f"📝 **Title:** {pool['content_title']}\n"
                     text += f"💰 **Total Cost:** {total_cost} ⭐\n"
-                    text += f"💫 **Starting Price:** {pool['current_price_per_user']} ⭐ per person\n\n"
-                    text += f"💡 Price decreases as more people buy!\n\n"
-                    text += f"Users can now buy this deal using `/deals`!"
+                    text += f"💫 **Starting Price:** {pool['current_price_per_user']} ⭐\n\n"
+                    text += f"💡 Price adjusts automatically!\n\n"
+                    text += f"Users can now buy this content using `/content`!"
                     
                     # Add quick action buttons
                     keyboard = [
-                        [InlineKeyboardButton("💎 View Deal", callback_data=f"view_pool_{pool_id}")],
-                        [InlineKeyboardButton("📊 Deal Stats", callback_data="admin_pool_stats")]
+                        [InlineKeyboardButton("💎 View Content", callback_data=f"view_pool_{pool_id}")],
+                        [InlineKeyboardButton("📊 Content Stats", callback_data="admin_pool_stats")]
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
                     
                     await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
                 else:
-                    await update.message.reply_text("❌ Failed to create deal from request. Check request ID.")
+                    await update.message.reply_text("❌ Failed to create exclusive content from request. Check request ID.")
                 return
             
             elif mode == 'manual':
                 # Create deal manually
                 if len(context.args) < 5:
-                    await update.message.reply_text("❌ Usage: `/createdeal manual <creator> <title> <type> <total_cost> [description]`", parse_mode='Markdown')
+                    await update.message.reply_text("❌ Usage: `/createcontent manual <creator> <title> <type> <total_cost> [description]`", parse_mode='Markdown')
                     return
                 
                 creator_name = context.args[1]
@@ -150,19 +150,19 @@ class AdminDealHandlers:
                 
                 if pool_id:
                     pool = self.pool_manager.get_pool(pool_id)
-                    text = f"✅ **Pool Created Successfully!**\n\n"
-                    text += f"🆔 **Pool ID:** `{pool_id}`\n"
+                    text = f"✅ **Exclusive Content Created Successfully!**\n\n"
+                    text += f"🆔 **Content ID:** `{pool_id}`\n"
                     text += f"👤 **Creator:** {creator_name}\n"
                     text += f"📝 **Title:** {content_title}\n"
                     text += f"🎯 **Type:** {content_type.replace('_', ' ').title()}\n"
                     text += f"💰 **Total Cost:** {total_cost} ⭐\n"
-                    text += f"💫 **Starting Price:** {pool['current_price_per_user']} ⭐ per person\n"
+                    text += f"💫 **Starting Price:** {pool['current_price_per_user']} ⭐\n"
                     
                     if content_description:
                         text += f"📄 **Description:** {content_description}\n"
                     
                     text += f"\n⏰ **Expires:** {(datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')}\n\n"
-                    text += f"Users can now join this pool using `/pools`!"
+                    text += f"Users can now purchase this content using `/content`!"
                     
                     # Add quick action buttons
                     keyboard = [
@@ -216,7 +216,7 @@ class AdminDealHandlers:
                 
                 text += f"⭐ **Stars:**\n"
                 text += f"• In User Balances: {stats['total_stars_in_system']} ⭐\n"
-                text += f"• Contributed to Pools: {stats['total_stars_contributed']} ⭐\n"
+                text += f"• Purchased for Content: {stats['total_stars_contributed']} ⭐\n"
                 
                 # Calculate success rate
                 if stats['total_pools'] > 0:
@@ -269,14 +269,14 @@ No pending requests found.
 • You can then create pools from these requests
 
 **Commands:**
-• `/poolstats` - View pool system statistics
-• `/createpool manual <creator> <title> <type> <cost>` - Create manual pool
+• `/contentstats` - View content system statistics
+• `/createcontent manual <creator> <title> <type> <cost>` - Create manual content
 """
                 await update.message.reply_text(text, parse_mode='Markdown')
                 return
             
             text = f"📋 **Pending Requests** ({len(requests)})\n\n"
-            text += "💡 Use `/createpool request <request_id> <total_cost>` to create pools\n\n"
+            text += "💡 Use `/createcontent request <request_id> <total_cost>` to create content\n\n"
             
             for i, req in enumerate(requests[:10], 1):  # Show max 10 requests
                 req_type_emoji = "👤" if req['type'] == 'creator' else "🎯"
@@ -289,8 +289,8 @@ No pending requests found.
                 text += f"... and {len(requests) - 10} more requests\n\n"
             
             text += "**Quick Actions:**\n"
-            text += "• `/createpool request <ID> <cost>` - Create pool from request\n"
-            text += "• `/poolstats` - View pool statistics"
+            text += "• `/createcontent request <ID> <cost>` - Create content from request\n"
+            text += "• `/contentstats` - View content statistics"
             
             await update.message.reply_text(text, parse_mode='Markdown')
             
@@ -341,17 +341,17 @@ Usage: `/completepool <pool_id> <content_url>`
             success = self.pool_manager.complete_pool(pool_id, content_url)
             
             if success:
-                # Send content to all contributors automatically
-                await self._deliver_content_to_contributors(pool_id, content_url, context)
+                # Send content to all purchases automatically
+                await self._deliver_content_to_purchases(pool_id, content_url, context)
                 
                 text = f"✅ **Pool Completed Successfully!**\n\n"
                 text += f"🆔 **Pool ID:** `{pool_id}`\n"
                 text += f"👤 **Creator:** {pool['creator_name']}\n"
                 text += f"📝 **Title:** {pool['content_title']}\n"
                 text += f"💰 **Final Amount:** {pool['current_amount']}/{pool['total_cost']} ⭐\n"
-                text += f"👥 **Contributors:** {pool['contributors_count']}\n"
+                text += f"👥 **Purchases:** {pool['purchases_count']}\n"
                 text += f"🔗 **Content URL:** {content_url}\n\n"
-                text += f"🎉 Content automatically delivered to all contributors!"
+                text += f"🎉 Content automatically delivered to all purchases!"
                 
                 await update.message.reply_text(text, parse_mode='Markdown')
             else:
@@ -383,7 +383,7 @@ Usage: `/cancelpool <pool_id> [reason]`
 **Example:**
 `/cancelpool POOL-20240115120000-ABC123 Content no longer available`
 
-⚠️ **Warning:** This will refund all contributors!
+⚠️ **Warning:** This will refund all purchases!
 """
             await update.message.reply_text(help_text, parse_mode='Markdown')
             return
@@ -411,9 +411,9 @@ Usage: `/cancelpool <pool_id> [reason]`
                 text += f"👤 **Creator:** {pool['creator_name']}\n"
                 text += f"📝 **Title:** {pool['content_title']}\n"
                 text += f"💰 **Amount:** {pool['current_amount']}/{pool['total_cost']} ⭐\n"
-                text += f"👥 **Contributors:** {pool['contributors_count']}\n"
+                text += f"👥 **Purchases:** {pool['purchases_count']}\n"
                 text += f"📝 **Reason:** {reason}\n\n"
-                text += f"💸 All contributors will be refunded automatically."
+                text += f"💸 All purchases will be refunded automatically."
                 
                 await update.message.reply_text(text, parse_mode='Markdown')
             else:
@@ -496,7 +496,7 @@ Usage: `/cancelpool <pool_id> [reason]`
                     text += f"**{i}. {pool['creator_name']}**\n"
                     text += f"📝 {pool['content_title']}\n"
                     text += f"💰 {pool['current_amount']}/{pool['total_cost']} ⭐ ({progress:.1f}%)\n"
-                    text += f"👥 {pool['contributors_count']} contributors\n\n"
+                    text += f"👥 {pool['purchases_count']} purchases\n\n"
                     
                     keyboard.append([InlineKeyboardButton(
                         f"🔍 Pool {i}", 
@@ -521,7 +521,7 @@ Usage: `/cancelpool <pool_id> [reason]`
             text += f"Cleaned up {cleaned_count} expired pools.\n"
             
             if cleaned_count > 0:
-                text += f"All contributors have been automatically refunded."
+                text += f"All purchases have been automatically refunded."
             else:
                 text += f"No expired pools found."
             
@@ -537,14 +537,14 @@ Usage: `/cancelpool <pool_id> [reason]`
             logger.error(f"Error in admin cleanup callback: {e}")
             await query.edit_message_text("❌ Error during cleanup.")
     
-    async def _deliver_content_to_contributors(self, pool_id: str, content_url: str, context: ContextTypes.DEFAULT_TYPE):
-        """Automatically deliver content to all pool contributors."""
+    async def _deliver_content_to_purchases(self, pool_id: str, content_url: str, context: ContextTypes.DEFAULT_TYPE):
+        """Automatically deliver content to all pool purchases."""
         try:
-            # Get all contributors for this pool
-            contributors = self.pool_manager.get_pool_contributors(pool_id)
+            # Get all purchases for this pool
+            purchases = self.pool_manager.get_pool_purchases(pool_id)
             
-            if not contributors:
-                logger.warning(f"No contributors found for pool {pool_id}")
+            if not purchases:
+                logger.warning(f"No purchases found for pool {pool_id}")
                 return
             
             # Get pool details for the message
@@ -557,27 +557,27 @@ Usage: `/cancelpool <pool_id> [reason]`
             message_text = f"🎉 **Pool Content Delivered!**\n\n"
             message_text += f"👤 **Creator:** {pool['creator_name']}\n"
             message_text += f"📝 **Title:** {pool['content_title']}\n"
-            message_text += f"💰 **Your Contribution:** {contributors[0].get('amount', 'N/A')} ⭐\n\n"
+            message_text += f"💰 **Your Purchase:** {purchases[0].get('amount', 'N/A')} ⭐\n\n"
             message_text += f"🔗 **Access Your Content:**\n{content_url}\n\n"
-            message_text += f"Thank you for participating in the community pool! 💖"
+            message_text += f"Thank you for your purchase! 💖"
             
-            # Send to each contributor
+            # Send to each purchaser
             delivered_count = 0
             failed_count = 0
             
-            for contributor in contributors:
+            for purchaser in purchases:
                 try:
-                    user_id = contributor.get('user_id')
+                    user_id = purchaser.get('user_id')
                     if not user_id:
                         continue
                     
-                    # Personalize the message with their contribution amount
+                    # Personalize the message with their purchase amount
                     personal_message = message_text.replace(
-                        f"💰 **Your Contribution:** {contributors[0].get('amount', 'N/A')} ⭐",
-                        f"💰 **Your Contribution:** {contributor.get('amount', 'N/A')} ⭐"
+                        f"💰 **Your Purchase:** {purchases[0].get('amount', 'N/A')} ⭐",
+                        f"💰 **Your Purchase:** {purchaser.get('amount', 'N/A')} ⭐"
                     )
                     
-                    # Send the content to the contributor
+                    # Send the content to the purchaser
                     await context.bot.send_message(
                         chat_id=user_id,
                         text=personal_message,
@@ -585,7 +585,7 @@ Usage: `/cancelpool <pool_id> [reason]`
                     )
                     
                     delivered_count += 1
-                    logger.info(f"Delivered content to contributor {user_id} for pool {pool_id}")
+                    logger.info(f"Delivered content to purchaser {user_id} for pool {pool_id}")
                     
                     # Small delay to avoid rate limiting
                     import asyncio
@@ -593,12 +593,12 @@ Usage: `/cancelpool <pool_id> [reason]`
                     
                 except Exception as e:
                     failed_count += 1
-                    logger.error(f"Failed to deliver content to contributor {user_id}: {e}")
+                    logger.error(f"Failed to deliver content to purchaser {user_id}: {e}")
             
             logger.info(f"Content delivery complete for pool {pool_id}: {delivered_count} delivered, {failed_count} failed")
             
         except Exception as e:
-            logger.error(f"Error delivering content to contributors for pool {pool_id}: {e}")
+            logger.error(f"Error delivering content to purchases for pool {pool_id}: {e}")
 
 
 # Global instance
