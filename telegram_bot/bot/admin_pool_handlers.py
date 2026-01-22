@@ -60,10 +60,8 @@ class AdminPoolHandlers:
 • `description` - Optional description
 
 **Examples:**
-```
-/createpool request CR-20240115120000-123456789 100
-/createpool manual bella_thorne "Premium Photos" photo_set 50 "Exclusive beach photoshoot"
-```
+`/createpool request CR-20240115120000-123456789 100`
+`/createpool manual bella_thorne "Premium Photos" photo_set 50 "Exclusive beach photoshoot"`
 
 💡 **Dynamic Pricing:** Users pay less as more people join!
 """
@@ -322,9 +320,7 @@ Usage: `/completepool <pool_id> <content_url>`
 • `content_url` - URL to the unlocked content
 
 **Example:**
-```
-/completepool POOL-20240115120000-ABC123 https://example.com/content/123
-```
+`/completepool POOL-20240115120000-ABC123 https://example.com/content/123`
 """
             await update.message.reply_text(help_text, parse_mode='Markdown')
             return
@@ -387,9 +383,7 @@ Usage: `/cancelpool <pool_id> [reason]`
 • `reason` - Optional reason for cancellation
 
 **Example:**
-```
-/cancelpool POOL-20240115120000-ABC123 Content no longer available
-```
+`/cancelpool POOL-20240115120000-ABC123 Content no longer available`
 
 ⚠️ **Warning:** This will refund all contributors!
 """
