@@ -1461,8 +1461,9 @@ Welcome, worker! Your job is to help improve video titles in our content library
         elif (data.startswith("view_pool_") or data.startswith("contribute_") or 
               data.startswith("custom_contribute_") or data == "my_balance" or 
               data == "my_contributions" or data.startswith("buy_stars_") or 
-              data == "back_to_pools" or data == "buy_stars_menu"):
-            await self.pool_handlers.handle_pool_callback(update, context)
+              data == "back_to_deals" or data == "buy_stars_menu" or
+              data.startswith("join_pool_") or data == "pools_menu"):
+            await self.pool_handlers.handle_deal_callback(update, context)
         # Admin pool callbacks
         elif (data == "admin_pool_stats" or data == "admin_view_pools" or 
               data == "admin_cleanup_pools"):

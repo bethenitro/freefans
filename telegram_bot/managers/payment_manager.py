@@ -370,7 +370,7 @@ class PaymentManager:
             keyboard.append(row)
         
         # Add back button
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_to_pools")])
+        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_to_deals")])
         
         return InlineKeyboardMarkup(keyboard)
     

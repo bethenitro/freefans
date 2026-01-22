@@ -77,8 +77,8 @@ No exclusive content available right now!
                 )])
             
             # Add navigation buttons
-            if len(deals) > 5:
-                keyboard.append([InlineKeyboardButton("📄 View More", callback_data="pools_page_2")])
+            # if len(deals) > 5:
+            #     keyboard.append([InlineKeyboardButton("📄 View More", callback_data="pools_page_2")])
             
             keyboard.append([
                 InlineKeyboardButton("💰 My Balance", callback_data="my_balance"),
@@ -131,6 +131,9 @@ No exclusive content available right now!
             
             elif data == 'back_to_deals':
                 await self._handle_back_to_deals(query)
+            
+            elif data == 'pools_menu':
+                await self._handle_back_to_deals(query)  # Same as back to deals
             
         except Exception as e:
             logger.error(f"Error in deal callback: {e}")
@@ -267,7 +270,7 @@ No exclusive content available right now!
         
         keyboard = [
             [InlineKeyboardButton("💳 Buy Stars", callback_data="buy_stars_menu")],
-            [InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_pools")]
+            [InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_deals")]
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -297,7 +300,7 @@ No exclusive content available right now!
                 text += f"💰 Paid: {contrib['amount']} ⭐ {status_emoji}\n"
                 text += f"📅 {contrib['created_at'].strftime('%Y-%m-%d')}\n\n"
         
-        keyboard = [[InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_pools")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back to Content", callback_data="back_to_deals")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
@@ -336,25 +339,59 @@ No exclusive content available right now!
     
     async def _handle_back_to_deals(self, query):
         """Handle back to deals navigation."""
-        # Simulate the deals command
-        from telegram import Message
+        user_id = query.from_user.id
         
-        # Create a fake update for the pools command
-        fake_message = Message(
-            message_id=query.message.message_id,
-            date=datetime.now(),
-            chat=query.message.chat,
-            from_user=query.from_user
-        )
-        fake_update = Update(update_id=0, message=fake_message)
+        # Get active deals
+        deals = self.pool_manager.get_active_pools(limit=10)
         
-        # Delete the current message and send new pools list
-        try:
-            await query.delete_message()
-        except:
-            pass
+        if not deals:
+            text = """
+💎 **Exclusive Content**
+
+No exclusive content available right now! 
+
+💰 Use `/balance` to check your Stars balance
+"""
+            await query.edit_message_text(text, parse_mode='Markdown')
+            return
         
-        await self.handle_pools_command(fake_update, None)
+        # Create deals list
+        text = "💎 **Exclusive Content**\n\n"
+        text += "💡 Get exclusive content at amazing prices!\n\n"
+        
+        keyboard = []
+        for i, deal in enumerate(deals[:5], 1):  # Show max 5 deals
+            
+            text += f"**{i}. {deal['creator_name']}**\n"
+            text += f"📝 {deal['content_title']}\n"
+            text += f"💰 Price: {deal['current_price_per_user']} ⭐\n\n"
+            
+            # Add enticing view button
+            button_texts = [
+                f"🔥 Hot Content {i}",
+                f"💎 VIP Access {i}",
+                f"🌟 Premium {i}",
+                f"💋 Exclusive {i}",
+                f"🎯 Special {i}"
+            ]
+            
+            button_text = button_texts[i-1] if i-1 < len(button_texts) else f"💎 Content {i}"
+            keyboard.append([InlineKeyboardButton(
+                button_text, 
+                callback_data=f"view_pool_{deal['pool_id']}"
+            )])
+        
+        # Add navigation buttons
+        # if len(deals) > 5:
+        #     keyboard.append([InlineKeyboardButton("📄 View More", callback_data="pools_page_2")])
+        
+        keyboard.append([
+            InlineKeyboardButton("💰 My Balance", callback_data="my_balance"),
+            InlineKeyboardButton("📊 My Purchases", callback_data="my_contributions")
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     
     def _create_progress_bar(self, percentage: float, length: int = 10) -> str:
         """Create a visual progress bar."""

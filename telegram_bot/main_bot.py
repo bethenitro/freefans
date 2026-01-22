@@ -397,7 +397,7 @@ class FreeFansBot:
             data.startswith("custom_contribute_") or data == "my_balance" or 
             data == "my_contributions" or data.startswith("buy_stars_") or 
             data == "back_to_deals" or data == "buy_stars_menu" or
-            data.startswith("join_pool_")):
+            data.startswith("join_pool_") or data == "pools_menu"):
             await self.pool_handlers.handle_deal_callback(update, context)
         # Route admin pool callbacks
         elif (data == "admin_pool_stats" or data == "admin_view_pools" or 
