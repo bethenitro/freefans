@@ -678,3 +678,37 @@ async def fix_channel_links_command(update: Update, context: ContextTypes.DEFAUL
     except Exception as e:
         logger.error(f"Error fixing channel links: {e}")
         await update.message.reply_text("❌ Error fixing channel links.")
+
+async def toggle_admin_bypass_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle admin bypass for channel requirements (main admin only)."""
+    user_id = update.effective_user.id
+    permissions = get_permissions_manager()
+    
+    if not permissions.is_main_admin(user_id):
+        await update.message.reply_text("❌ This command is for main admin only.")
+        return
+    
+    try:
+        channel_manager = get_channel_manager()
+        config = channel_manager._get_full_config()
+        
+        current_bypass = config.get('bypass_for_admins', True)
+        new_bypass = not current_bypass
+        
+        success = channel_manager.update_settings(bypass_for_admins=new_bypass)
+        
+        if success:
+            status = "ENABLED" if new_bypass else "DISABLED"
+            await update.message.reply_text(
+                f"✅ **Admin Bypass {status}**\n\n"
+                f"Admin bypass is now: {'✅ Enabled' if new_bypass else '❌ Disabled'}\n\n"
+                f"{'Admins can use the bot without joining channels' if new_bypass else 'Admins must join channels like regular users'}\n\n"
+                f"💡 Use this command again to toggle back.",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text("❌ Failed to update admin bypass setting.")
+            
+    except Exception as e:
+        logger.error(f"Error toggling admin bypass: {e}")
+        await update.message.reply_text("❌ Error updating setting.")

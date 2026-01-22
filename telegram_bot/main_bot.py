@@ -36,7 +36,8 @@ from bot.channel_handlers import (
     list_required_channels_command, channel_settings_command,
     handle_channel_callback, set_welcome_message_command,
     set_membership_message_command, channel_diagnostics_command,
-    test_user_channels_command, fix_channel_links_command
+    test_user_channels_command, fix_channel_links_command,
+    toggle_admin_bypass_command
 )
 from bot.channel_middleware import handle_check_membership_callback
 from managers.cache_factory import get_cache_manager
@@ -119,6 +120,8 @@ class FreeFansBot:
         """
         try:
             user_id = update.effective_user.id
+            logger.info(f"🔍 Universal channel check for user {user_id}")
+            
             from managers.channel_manager import get_channel_manager
             from managers.permissions_manager import get_permissions_manager
             
@@ -127,21 +130,30 @@ class FreeFansBot:
             
             # Always allow main admin
             if permissions_manager.is_main_admin(user_id):
+                logger.info(f"✅ User {user_id} is main admin - bypassing channel checks")
                 return True
             
             # Check if there are any required channels
             required_channels = channel_manager.get_required_channels()
+            logger.info(f"📋 Found {len(required_channels)} required channels")
+            
             if not required_channels:
+                logger.info(f"✅ No channels required - allowing user {user_id}")
                 return True  # No channels required
             
             # Check if user should bypass
             if channel_manager._should_bypass_user(user_id):
+                logger.info(f"✅ User {user_id} bypasses channel requirements")
                 return True
+            
+            logger.info(f"🚫 User {user_id} must join {len(required_channels)} channels - checking membership...")
             
             # Check membership
             is_member, missing_channels = await channel_manager.check_user_membership(user_id, context)
             
             if not is_member and missing_channels:
+                logger.info(f"❌ User {user_id} missing {len(missing_channels)} channels - BLOCKING ACCESS")
+                
                 # User is not member of all required channels - BLOCK EVERYTHING
                 message = "🚫 **Access Restricted**\n\n"
                 message += "You must join ALL required channels before using this bot.\n\n"
@@ -200,11 +212,12 @@ class FreeFansBot:
                         pass  # If all fails, just block silently
                 
                 return False  # Block execution
-                
-            return True  # Allow execution
+            else:
+                logger.info(f"✅ User {user_id} is member of all required channels - allowing access")
+                return True  # Allow execution
             
         except Exception as e:
-            logger.error(f"Error in universal channel check: {e}")
+            logger.error(f"❌ Error in universal channel check for user {user_id if 'user_id' in locals() else 'unknown'}: {e}")
             # On critical error, allow execution to prevent bot lockup
             return True
 
@@ -542,6 +555,7 @@ def main():
     application.add_handler(CommandHandler("channeldiagnostics", create_channel_protected_handler(channel_diagnostics_command)))
     application.add_handler(CommandHandler("testchannels", create_channel_protected_handler(test_user_channels_command)))
     application.add_handler(CommandHandler("fixchannellinks", create_channel_protected_handler(fix_channel_links_command)))
+    application.add_handler(CommandHandler("toggleadminbypass", create_channel_protected_handler(toggle_admin_bypass_command)))
     
     # Pool commands with channel protection
     async def pools_command_wrapper(update, context):

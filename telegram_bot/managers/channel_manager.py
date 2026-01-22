@@ -33,8 +33,13 @@ class ChannelManager:
         try:
             with open(self.config_file, 'r') as f:
                 data = json.load(f)
-                return data.get('channels', [])
-        except (FileNotFoundError, json.JSONDecodeError):
+                channels = data.get('channels', [])
+                logger.info(f"📋 Loaded {len(channels)} required channels from {self.config_file}")
+                for i, channel in enumerate(channels, 1):
+                    logger.info(f"   {i}. {channel.get('channel_name')} ({channel.get('channel_id')})")
+                return channels
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.warning(f"⚠️ Config file issue ({e}) - creating default config")
             # Create default config if file doesn't exist
             default_config = {
                 "channels": [],
@@ -154,16 +159,22 @@ class ChannelManager:
         
         # Always bypass for main admin
         if self.permissions_manager.is_main_admin(user_id):
+            logger.info(f"🔓 User {user_id} is main admin - bypassing channel requirements")
             return True
         
         # Check admin bypass setting
-        if config.get('bypass_for_admins', True) and self.permissions_manager.is_admin(user_id):
+        bypass_admins = config.get('bypass_for_admins', True)
+        if bypass_admins and self.permissions_manager.is_admin(user_id):
+            logger.info(f"🔓 User {user_id} is admin with bypass enabled - bypassing channel requirements")
             return True
         
         # Check worker bypass setting
-        if config.get('bypass_for_workers', False) and self.permissions_manager.is_worker(user_id):
+        bypass_workers = config.get('bypass_for_workers', False)
+        if bypass_workers and self.permissions_manager.is_worker(user_id):
+            logger.info(f"🔓 User {user_id} is worker with bypass enabled - bypassing channel requirements")
             return True
         
+        logger.info(f"🔒 User {user_id} must follow channel requirements (not admin/worker or bypass disabled)")
         return False
     
     def add_required_channel(self, channel_id: str, channel_name: str, channel_link: str = None) -> bool:
@@ -174,6 +185,7 @@ class ChannelManager:
             # Check if channel already exists
             for channel in config['channels']:
                 if channel.get('channel_id') == channel_id:
+                    logger.warning(f"⚠️ Channel {channel_id} already exists in required channels")
                     return False  # Already exists
             
             # Add new channel
@@ -187,11 +199,11 @@ class ChannelManager:
             self._save_channels(config)
             self.required_channels = config['channels']
             
-            logger.info(f"Added required channel: {channel_name} ({channel_id})")
+            logger.info(f"✅ Added required channel: {channel_name} ({channel_id}) - Total channels: {len(self.required_channels)}")
             return True
             
         except Exception as e:
-            logger.error(f"Error adding required channel: {e}")
+            logger.error(f"❌ Error adding required channel: {e}")
             return False
     
     def remove_required_channel(self, channel_id: str) -> bool:

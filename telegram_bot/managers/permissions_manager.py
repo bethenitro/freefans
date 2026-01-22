@@ -23,6 +23,8 @@ class PermissionsManager:
             config_path = str(base_dir / 'shared' / 'config' / 'permissions_config.json')
         self.config_path = config_path
         self.lock = threading.Lock()
+        logger.info(f"🔧 PermissionsManager initializing with config: {self.config_path}")
+        logger.info(f"📁 Config file exists: {os.path.exists(self.config_path)}")
         self._load_config()
     
     def _load_config(self):
@@ -31,10 +33,15 @@ class PermissionsManager:
             try:
                 with open(self.config_path, 'r') as f:
                     self.config = json.load(f)
+                logger.info(f"✅ Loaded permissions config from {self.config_path}")
+                logger.info(f"📊 Main admin: {self.config.get('main_admin')}")
+                logger.info(f"📊 Admins: {self.config.get('admins', [])}")
+                logger.info(f"📊 Workers: {self.config.get('workers', [])}")
             except Exception as e:
-                logger.error(f"Error loading permissions config: {e}")
+                logger.error(f"❌ Error loading permissions config: {e}")
                 self._init_default_config()
         else:
+            logger.warning(f"⚠️ Permissions config not found at {self.config_path} - creating default")
             self._init_default_config()
     
     def _init_default_config(self):
@@ -52,10 +59,15 @@ class PermissionsManager:
     def _save_config(self):
         """Save permissions configuration to file."""
         try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
             with open(self.config_path, 'w') as f:
                 json.dump(self.config, f, indent=2)
+            logger.info(f"💾 Saved permissions config to {self.config_path}")
+            logger.info(f"📊 Saved - Main admin: {self.config.get('main_admin')}")
+            logger.info(f"📊 Saved - Admins: {self.config.get('admins', [])}")
         except Exception as e:
-            logger.error(f"Error saving permissions config: {e}")
+            logger.error(f"❌ Error saving permissions config to {self.config_path}: {e}")
     
     def is_admin(self, user_id: int) -> bool:
         """Check if user is an admin (includes main admin)."""
@@ -143,11 +155,12 @@ class PermissionsManager:
         """Set a user as the main admin. Returns True if successful."""
         with self.lock:
             if self.config.get('main_admin') is not None:
-                logger.warning(f"Attempted to set main admin when one already exists")
+                logger.warning(f"⚠️ Attempted to set main admin {user_id} when one already exists: {self.config.get('main_admin')}")
                 return False
             self.config['main_admin'] = user_id
+            logger.info(f"👑 Setting main admin to {user_id}")
             self._save_config()
-            logger.info(f"Set main admin: {user_id}")
+            logger.info(f"✅ Main admin set successfully: {user_id}")
             return True
     
     def remove_main_admin(self) -> bool:
