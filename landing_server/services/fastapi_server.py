@@ -45,9 +45,6 @@ app = FastAPI(title="FreeFans Landing Server", version="1.0.0")
 # Get base directory for templates and static files
 BASE_DIR = Path(__file__).parent.parent
 
-# In-memory storage for short URLs (in production, use Redis or database)
-url_storage: Dict[str, Dict[str, Any]] = {}
-
 # Global DB availability flag (set during startup)
 db_initialized = False
 
@@ -72,38 +69,86 @@ async def startup_event():
     """Initialize database connection pool on startup (Vercel-optimized)"""
     global db_initialized
     try:
-        from shared.config.database import init_database, create_tables
-        
         logger.info("🚀 Starting up landing server on Vercel...")
         
-        # Initialize database connection pool only
-        if not init_database():
-            logger.error("⚠️ Database initialization failed - landing server will work with memory only")
+        # Check if database URL is available
+        database_url = config('SUPABASE_DATABASE_URL', default=None)
+        if not database_url:
+            logger.error("❌ SUPABASE_DATABASE_URL not found in environment variables")
             db_initialized = False
             return
         
-        if not create_tables():
-            logger.error("⚠️ Database table creation failed - landing server will work with memory only")
-            db_initialized = False
-            return
+        logger.info(f"📊 Database URL found: {database_url[:50]}...")
         
-        db_initialized = True
-        logger.info("✅ Database connection pool ready for Vercel deployment")
-        
-        # Test database connection
+        # Import database functions with error handling
         try:
-            from shared.config.database import get_db_session_sync
-            db = get_db_session_sync()
-            db.execute("SELECT 1")
-            db.close()
-            logger.info("✅ Database connection test successful")
-        except Exception as e:
-            logger.error(f"⚠️ Database connection test failed: {e}")
+            from shared.config.database import init_database, create_tables
+        except ImportError as e:
+            logger.error(f"❌ Failed to import database modules: {e}")
             db_initialized = False
+            return
+        
+        # Initialize database connection pool with retry
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if init_database():
+                    logger.info(f"✅ Database engine initialized (attempt {attempt + 1})")
+                    break
+                else:
+                    logger.warning(f"⚠️ Database initialization failed (attempt {attempt + 1})")
+                    if attempt == max_retries - 1:
+                        db_initialized = False
+                        return
+            except Exception as e:
+                logger.error(f"❌ Database initialization error (attempt {attempt + 1}): {e}")
+                if attempt == max_retries - 1:
+                    db_initialized = False
+                    return
+        
+        # Create tables with retry
+        for attempt in range(max_retries):
+            try:
+                if create_tables():
+                    logger.info(f"✅ Database tables created/verified (attempt {attempt + 1})")
+                    break
+                else:
+                    logger.warning(f"⚠️ Database table creation failed (attempt {attempt + 1})")
+                    if attempt == max_retries - 1:
+                        db_initialized = False
+                        return
+            except Exception as e:
+                logger.error(f"❌ Database table creation error (attempt {attempt + 1}): {e}")
+                if attempt == max_retries - 1:
+                    db_initialized = False
+                    return
+        
+        # Test database connection with retry
+        for attempt in range(max_retries):
+            try:
+                from shared.config.database import get_db_session_sync
+                from sqlalchemy import text
+                db = get_db_session_sync()
+                result = db.execute(text("SELECT 1")).fetchone()
+                db.close()
+                if result and result[0] == 1:
+                    db_initialized = True
+                    logger.info(f"✅ Database connection test successful (attempt {attempt + 1}) - ready for Vercel deployment")
+                    break
+                else:
+                    logger.error(f"❌ Database connection test failed - unexpected result (attempt {attempt + 1})")
+                    if attempt == max_retries - 1:
+                        db_initialized = False
+            except Exception as e:
+                logger.error(f"❌ Database connection test failed (attempt {attempt + 1}): {e}")
+                if attempt == max_retries - 1:
+                    db_initialized = False
         
     except Exception as e:
-        logger.error(f"⚠️ Startup error: {e}")
+        logger.error(f"❌ Startup error: {e}")
         db_initialized = False
+    
+    logger.info(f"🏁 Startup complete - Database initialized: {db_initialized}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -125,29 +170,26 @@ async def shutdown_event():
     print("✅ Landing server shutdown complete")
 
 def cleanup_expired_links():
-    """Clean up expired links from memory storage"""
-    current_time = datetime.now(timezone.utc)
-    expired_keys = []
+    """Clean up expired links from database (no memory storage used)"""
+    if not db_initialized:
+        logger.warning("⚠️ Database not initialized, cannot cleanup expired links")
+        return 0
     
-    for short_id, data_dict in url_storage.items():
+    try:
+        from shared.config.database import get_db_session_sync
+        from shared.data import crud
+        
+        db = get_db_session_sync()
         try:
-            expires_at = datetime.fromisoformat(data_dict['expires'])
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            
-            if current_time > expires_at:
-                expired_keys.append(short_id)
-        except Exception as e:
-            logger.error(f"Error checking expiration for {short_id}: {e}")
-            expired_keys.append(short_id)  # Remove malformed entries
-    
-    for key in expired_keys:
-        del url_storage[key]
-    
-    if expired_keys:
-        logger.info(f"🗑️ Cleaned up {len(expired_keys)} expired links from memory")
-    
-    return len(expired_keys)
+            count = crud.cleanup_expired_landing_pages(db)
+            if count > 0:
+                logger.info(f"🗑️ Cleaned up {count} expired links from database")
+            return count
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Failed to cleanup expired links: {e}")
+        return 0
 
 def generate_short_id(length: int = 8) -> str:
     """Generate a short random ID for URLs"""
@@ -191,31 +233,7 @@ def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
     try:
         logger.info(f"🔍 Verifying short URL: {short_id}")
         
-        # Check in-memory storage first (fastest for current request)
-        data_dict = url_storage.get(short_id)
-        if data_dict:
-            logger.info(f"📥 Found {short_id} in memory storage (fast path)")
-            # Check expiration - use UTC for consistency
-            try:
-                expires_at = datetime.fromisoformat(data_dict['expires'])
-                # Ensure we're comparing timezone-aware datetimes
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                
-                current_time = datetime.now(timezone.utc)
-                if current_time > expires_at:
-                    # Clean up expired link
-                    del url_storage[short_id]
-                    logger.info(f"🗑️ Cleaned up expired link from memory: {short_id}")
-                else:
-                    logger.info(f"✅ Valid link found in memory: {short_id}")
-                    return data_dict
-            except Exception as e:
-                logger.error(f"❌ Error parsing expiration for {short_id}: {e}")
-                # Remove malformed entry
-                del url_storage[short_id]
-        
-        # On Vercel, try database as fallback (memory is reset between requests)
+        # Direct database lookup only (no memory storage)
         if db_initialized:
             try:
                 from shared.config.database import get_db_session_sync
@@ -244,9 +262,7 @@ def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
                                 'thumbnail': landing_page.thumbnail_url,
                                 'expires': expires_at.isoformat()
                             }
-                            # Store in memory for subsequent requests in this function call
-                            url_storage[short_id] = data_dict
-                            logger.info(f"✅ Loaded valid link from database: {short_id}")
+                            logger.info(f"✅ Valid link found in database: {short_id}")
                             return data_dict
                         else:
                             logger.info(f"🗑️ Found expired link in database: {short_id}")
@@ -255,8 +271,10 @@ def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
                             return None
                     else:
                         logger.warning(f"❌ Short URL not found in database: {short_id}")
+                        return None
                 except Exception as db_error:
                     logger.error(f"❌ Database query failed for {short_id}: {db_error}")
+                    return None
                 finally:
                     try:
                         db.close()
@@ -264,11 +282,10 @@ def verify_short_url(short_id: str) -> Optional[Dict[str, Any]]:
                         pass  # Ignore close errors
             except Exception as e:
                 logger.error(f"❌ Database connection failed for {short_id}: {e}")
+                return None
         else:
             logger.warning(f"⚠️ Database not initialized, cannot check for {short_id}")
-        
-        logger.warning(f"❌ Short URL verification failed (not found anywhere): {short_id}")
-        return None
+            return None
         
     except Exception as e:
         logger.error(f"❌ Error in verify_short_url for {short_id}: {e}")
@@ -436,10 +453,9 @@ async def debug_storage():
         return {
             "environment": "vercel",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "memory_storage": {
-                "count": len(url_storage),
-                "keys": list(url_storage.keys())[:10],  # Show first 10 keys
-                "note": "Memory resets between Vercel function calls"
+            "storage": {
+                "type": "database_only",
+                "note": "No memory storage used - all data stored in Supabase"
             },
             "database": {
                 "initialized": db_initialized,
@@ -447,7 +463,7 @@ async def debug_storage():
                 "recent_records_24h": db_records_count
             },
             "config": {
-                "base_url": config('LANDING_BASE_URL', default='http://localhost:8001'),
+                "base_url": config('LANDING_BASE_URL', default='https://freefans-seven.vercel.app'),
                 "secret_configured": bool(config('LANDING_SECRET_KEY', default=''))
             }
         }
@@ -457,32 +473,107 @@ async def debug_storage():
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+@app.get("/test/db")
+async def test_database():
+    """Test database connectivity and operations"""
+    try:
+        if not db_initialized:
+            return {
+                "status": "error",
+                "message": "Database not initialized",
+                "db_initialized": db_initialized
+            }
+        
+        from shared.config.database import get_db_session_sync
+        from shared.data import crud
+        from sqlalchemy import text
+        
+        db = get_db_session_sync()
+        try:
+            # Test basic connection
+            result = db.execute(text("SELECT 1 as test")).fetchone()
+            if not result or result[0] != 1:
+                return {"status": "error", "message": "Database query failed"}
+            
+            # Test landing page operations
+            test_short_id = "dbtest123"
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            
+            # Create test landing page
+            crud.upsert_landing_page(
+                db=db,
+                short_id=test_short_id,
+                creator="Test Creator",
+                title="Database Test",
+                content_type="🖼️ Photo Set",
+                original_url="https://example.com/test",
+                expires_at=expires_at
+            )
+            
+            # Retrieve test landing page
+            landing_page = crud.get_landing_page(db, test_short_id)
+            
+            # Clean up
+            crud.delete_landing_page(db, test_short_id)
+            
+            return {
+                "status": "success",
+                "message": "Database operations successful",
+                "test_data": {
+                    "created": landing_page is not None,
+                    "creator": landing_page.creator if landing_page else None,
+                    "title": landing_page.title if landing_page else None
+                }
+            }
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Database test failed: {str(e)}",
+            "db_initialized": db_initialized
+        }
 @app.get("/test/simple")
 async def test_simple_landing(request: Request):
     """Simple test endpoint to verify landing server is working"""
     
-    # Create a test short_id and store it in memory
+    if not db_initialized:
+        raise HTTPException(status_code=500, detail="Database not available")
+    
+    # Create a test short_id and store it in database
     test_short_id = "test123"
-    test_data = {
-        'creator': 'Test Creator',
-        'title': 'Test Content',
-        'type': '🖼️ Photo Set',
-        'url': 'https://example.com/test',
-        'preview': None,
-        'thumbnail': None,
-        'expires': (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
-    }
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
     
-    # Store in memory
-    url_storage[test_short_id] = test_data
-    
-    logger.info(f"✅ Created test landing page: /c/{test_short_id}")
+    try:
+        from shared.config.database import get_db_session_sync
+        from shared.data import crud
+        
+        db = get_db_session_sync()
+        try:
+            # Store test data in database
+            crud.upsert_landing_page(
+                db=db,
+                short_id=test_short_id,
+                creator='Test Creator',
+                title='Test Content',
+                content_type='🖼️ Photo Set',
+                original_url='https://example.com/test',
+                expires_at=expires_at
+            )
+            logger.info(f"✅ Created test landing page: /c/{test_short_id}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Failed to create test landing page: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create test page: {str(e)}")
     
     return {
         "message": "Test landing page created",
         "test_url": f"/c/{test_short_id}",
-        "full_url": f"{config('LANDING_BASE_URL', default='http://localhost:8001')}/c/{test_short_id}",
-        "data": test_data
+        "full_url": f"{config('LANDING_BASE_URL', default='https://freefans-seven.vercel.app')}/c/{test_short_id}",
+        "expires_at": expires_at.isoformat()
     }
 
 @app.get("/health")
@@ -496,10 +587,11 @@ async def health_check():
         if db_initialized:
             try:
                 from shared.config.database import get_db_session_sync
+                from sqlalchemy import text
                 db = get_db_session_sync()
                 try:
-                    # Simple query to test connection
-                    result = db.execute("SELECT 1 as test").fetchone()
+                    # Simple query to test connection with proper SQLAlchemy syntax
+                    result = db.execute(text("SELECT 1 as test")).fetchone()
                     if result and result[0] == 1:
                         db_status = "connected"
                     else:
@@ -514,21 +606,20 @@ async def health_check():
                 db_status = "error"
                 db_error = str(e)
         
-        # Cleanup expired URLs from memory
-        current_time = datetime.now(timezone.utc)
-        expired_keys = []
-        for short_id, data in list(url_storage.items()):
+        # Cleanup expired URLs from database
+        cleaned_count = 0
+        if db_initialized:
             try:
-                expires_at = datetime.fromisoformat(data['expires'])
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if current_time > expires_at:
-                    expired_keys.append(short_id)
-            except:
-                expired_keys.append(short_id)  # Remove malformed entries
-        
-        for key in expired_keys:
-            del url_storage[key]
+                from shared.config.database import get_db_session_sync
+                from shared.data import crud
+                
+                db = get_db_session_sync()
+                try:
+                    cleaned_count = crud.cleanup_expired_landing_pages(db)
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.error(f"❌ Failed to cleanup expired links: {e}")
         
         return {
             "status": "healthy",
@@ -538,12 +629,12 @@ async def health_check():
                 "status": db_status,
                 "error": db_error
             },
-            "memory_storage": {
-                "active_links": len(url_storage),
-                "cleaned_expired": len(expired_keys)
+            "storage": {
+                "type": "database_only",
+                "cleaned_expired": cleaned_count
             },
             "environment": "vercel",
-            "base_url": config('LANDING_BASE_URL', default='http://localhost:8001')
+            "base_url": config('LANDING_BASE_URL', default='https://freefans-seven.vercel.app')
         }
         
     except Exception as e:
@@ -553,6 +644,7 @@ async def health_check():
             "error": str(e),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
 @app.post("/api/cleanup")
 async def manual_cleanup():
     """Manual cleanup endpoint for debugging"""
@@ -639,27 +731,16 @@ async def generate_landing_link(content_data: ContentLink):
         except Exception as e:
             logger.error(f"❌ Error in preview extraction process for {short_id}: {e}")
     
-    # Store the content data with the short ID in memory (immediate)
-    url_storage[short_id] = {
-        'creator': content_data.creator_name,
-        'title': content_data.content_title,
-        'type': content_data.content_type,
-        'url': content_data.original_url,
-        'preview': preview_url_to_use,
-        'thumbnail': content_data.thumbnail_url,
-        'expires': expires_at.isoformat()
-    }
-    
-    # CRITICAL: Store in database IMMEDIATELY for Vercel serverless reliability
+    # Store directly in database only (no memory storage)
     if db_initialized:
         try:
             from shared.config.database import get_db_session_sync
             from shared.data import crud
             
-            logger.info(f"💾 Storing {short_id} in database immediately...")
+            logger.info(f"💾 Storing {short_id} in database...")
             db = get_db_session_sync()
             try:
-                # Use upsert to handle potential duplicates
+                # Store in database immediately
                 crud.upsert_landing_page(
                     db=db,
                     short_id=short_id,
@@ -671,19 +752,22 @@ async def generate_landing_link(content_data: ContentLink):
                     thumbnail_url=content_data.thumbnail_url,
                     expires_at=expires_at
                 )
-                logger.info(f"✅ Stored {short_id} in database immediately")
+                logger.info(f"✅ Stored {short_id} in database successfully")
             except Exception as db_error:
-                logger.error(f"❌ Immediate database storage failed for {short_id}: {db_error}")
-                # Continue anyway - memory storage might work for this request
+                logger.error(f"❌ Database storage failed for {short_id}: {db_error}")
+                # Return error if database storage fails
+                raise HTTPException(status_code=500, detail=f"Failed to store landing page: {str(db_error)}")
             finally:
                 db.close()
         except Exception as e:
-            logger.error(f"❌ Database connection failed for immediate storage {short_id}: {e}")
+            logger.error(f"❌ Database connection failed for {short_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
     else:
-        logger.warning(f"⚠️ DB not available, relying on memory only for {short_id}")
+        logger.error(f"❌ Database not available for {short_id}")
+        raise HTTPException(status_code=500, detail="Database not available")
     
     # Return URL immediately with preview
-    base_url = config('LANDING_BASE_URL', default='http://localhost:8001')
+    base_url = config('LANDING_BASE_URL', default='https://freefans-seven.vercel.app')
     full_url = f"{base_url}/c/{short_id}"
     
     # Start background task to cache the preview image (optional optimization)
@@ -714,7 +798,7 @@ async def _background_cache_preview_image(short_id: str, preview_url: str):
         cache_time = time.time() - cache_start
         if cached_path:
             # Update preview URL to use cached version in database
-            base_url = config('LANDING_BASE_URL', default='http://localhost:8001')
+            base_url = config('LANDING_BASE_URL', default='https://freefans-seven.vercel.app')
             cached_preview_url = f"{base_url}{cached_path}"
             
             # Update database with cached URL
@@ -840,18 +924,22 @@ async def generate_batch_landing_links(content_items: List[ContentLink]):
     logger.info(f"💾 Storing {len(items_with_previews)} items in memory and database")
     store_start = time.time()
     results = []
-    base_url = config('LANDING_BASE_URL', default='http://localhost:8001')
+    base_url = config('LANDING_BASE_URL', default='https://freefans-seven.vercel.app')
     
-    # Prepare database connection for batch operations
+    # Prepare database connection for batch operations (required)
+    if not db_initialized:
+        logger.error("❌ Database not initialized for batch operation")
+        raise HTTPException(status_code=500, detail="Database not available for batch operations")
+    
     db_session = None
-    if db_initialized:
-        try:
-            from shared.config.database import get_db_session_sync
-            from shared.data import crud
-            db_session = get_db_session_sync()
-            logger.info(f"📊 Database ready for batch storage")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize database for batch: {e}")
+    try:
+        from shared.config.database import get_db_session_sync
+        from shared.data import crud
+        db_session = get_db_session_sync()
+        logger.info(f"📊 Database ready for batch storage")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize database for batch: {e}")
+        raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
     
     for item in items_with_previews:
         # Handle exceptions from gather
@@ -863,17 +951,6 @@ async def generate_batch_landing_links(content_items: List[ContentLink]):
         content_data = item['content_data']
         expires_at = item['expires_at']
         preview_url = item['preview_url']
-        
-        # Store in memory
-        url_storage[short_id] = {
-            'creator': content_data.creator_name,
-            'title': content_data.content_title,
-            'type': content_data.content_type,
-            'url': content_data.original_url,
-            'preview': preview_url,
-            'thumbnail': content_data.thumbnail_url,
-            'expires': expires_at.isoformat()
-        }
         
         # Store in database immediately (critical for Vercel)
         if db_session:
@@ -892,6 +969,8 @@ async def generate_batch_landing_links(content_items: List[ContentLink]):
                 logger.debug(f"✅ Stored {short_id} in database")
             except Exception as db_error:
                 logger.error(f"❌ Database storage failed for {short_id}: {db_error}")
+                # Skip this item if database storage fails
+                continue
         
         full_url = f"{base_url}/c/{short_id}"
         results.append({
@@ -1017,6 +1096,6 @@ if __name__ == "__main__":
     
     print(f"🚀 Starting FastAPI Landing Server on {host}:{port}")
     print(f"📄 Landing pages will be served at http://{host}:{port}")
-    print(f"🔗 Base URL configured as: {config('LANDING_BASE_URL', default='http://localhost:8001')}")
+    print(f"🔗 Base URL configured as: {config('LANDING_BASE_URL', default='https://freefans-seven.vercel.app')}")
     
     uvicorn.run(app, host=host, port=port)
