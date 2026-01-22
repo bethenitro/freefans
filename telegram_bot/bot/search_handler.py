@@ -3,6 +3,7 @@ Search Handler - Handles creator search functionality
 """
 
 import logging
+from typing import List, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.error import TimedOut, NetworkError, BadRequest
