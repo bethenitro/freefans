@@ -315,6 +315,11 @@ class ChannelManager:
         except Exception as e:
             logger.error(f"Error validating channel links: {e}")
             return False
+    
+    def get_welcome_message(self) -> str:
+        """Get welcome message for new users."""
+        config = self._get_full_config()
+        return config.get('welcome_message', 'Welcome! To use this bot, please join our required channels first.')
 
 
 # Global instance
@@ -326,7 +331,3 @@ def get_channel_manager() -> ChannelManager:
     if _channel_manager is None:
         _channel_manager = ChannelManager()
     return _channel_manager
-    def get_welcome_message(self) -> str:
-        """Get welcome message for new users."""
-        config = self._get_full_config()
-        return config.get('welcome_message', 'Welcome! To use this bot, please join our required channels first.')
